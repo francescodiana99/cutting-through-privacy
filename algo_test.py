@@ -1,0 +1,547 @@
+import bisect
+import random
+import math
+import torch
+import torchvision
+import torchvision.transforms as transforms
+import matplotlib.pyplot as plt
+import numpy as np
+from utils import *
+
+
+def projection(x, y):
+    """
+    Project x onto y
+    """
+    return (torch.dot(x, y)/torch.dot(y, y))*y
+
+
+def project_onto_orth_subspace(x, orth_subspace):
+    residual = x
+    
+    for i in range(orth_subspace.shape[0]):
+        residual -= projection(x, orth_subspace[i])
+    return residual
+
+
+def check_span_artificial(observation, images_reconstructed, observation_points, orth_subspace):
+
+    """
+    Check if the observation is in the span of the images_reconstructed by projecting all the components"""
+    observation = observation.double()
+    orth_subspace = orth_subspace.double()
+    residual = project_onto_orth_subspace(observation, orth_subspace)
+
+    # for j in range(orth_subspace.shape[0]):
+    #     print(f"Dot product with the orthogonal component {j}: {torch.dot(residual, orth_subspace[j])}")
+
+    norm = torch.dot(residual, residual)
+    if norm > 1e-5:
+        flag = False
+
+    else:
+        flag = True
+
+    return flag, residual, norm
+
+
+def find_strips(images):
+    image_size = images.shape[1]
+
+    a = np.random.rand(image_size)
+    bounderay_image_min = -1*np.ones(image_size)
+    b_1 = -np.dot(a, bounderay_image_min)
+    bounderay_image_max = 1*np.ones(image_size)
+    b_2 = -np.dot(a, bounderay_image_max)
+
+    b_min = min(b_1, b_2)
+    b_max = max(b_1, b_2)
+
+    b_list = []
+    for i in range(images.shape[0]):
+        b_list.append(-np.dot(a, images[i]))
+
+    b_sorted, indices = torch.sort(torch.tensor(b_list))
+    epsilon_list = abs(b_sorted[:-1]-b_sorted[1:])
+    B_max = b_max
+    interval = b_max-b_min
+    observations = dict()
+
+    observation_points = []
+    recovered_points = []
+
+    for j in range(images.shape[0]):
+        print(f"Round {j} : b_min {b_min}, b_max {b_max}")
+
+        while interval>min(epsilon_list)/2:
+            current_b = b_min + (b_max-b_min)/2 # find the middle point
+            indices_left = bisect.bisect_left(b_sorted.numpy(), current_b)
+            images_indices_left = indices[:indices_left]
+            if len(images_indices_left) == 0:
+                b_min = current_b
+            else:
+                # TODO: we should use the real weights
+                # generating random weithts for the observation
+                alpha = np.random.uniform(-1,1, size=images_indices_left.shape[0]) 
+                alpha = torch.tensor(alpha/sum(alpha), dtype=torch.float32)
+                # using a fake observation, based on the linear combination of the images on the left
+                observation = alpha @ images[images_indices_left] 
+                observations[current_b] = observation
+
+
+                # checking the observations to decide which direction to go
+                if len(observation_points) == 0: 
+                    b_max = current_b
+                
+                else:
+                    # flag = inside_span_test(observation, observations_points, observations)
+                    # flag = inside_span(observation, observations_points, observations)
+
+                    # TODO: this should not use the artificial computation
+                    if len(images_reconstruct) == 1:
+                        orth_subspace = images_reconstruct[0].unsqueeze(0)
+
+                    # observation = 0.3 * orth_subspace[0] 
+
+                    flag, residual, norm = check_span_artificial(observation, images_reconstruct, observation_points, orth_subspace)
+                    if flag:
+                        b_min = current_b
+                    else:
+                        b_max = current_b
+                        # additional checks
+                        if len(images_indices_left) == len(observation_points) and not(flag):
+                            print("---Warning: an image has been detected even though it should not")
+                            print(f"Norm of the residual: {torch.dot(residual, residual)}")
+                            orth_subspace = orth_subspace.double()
+                            for k in range(orth_subspace.shape[0]):
+                                residual = residual.double()
+                                print(f"Dot product with the orthogonal component {k}: {torch.dot(residual, orth_subspace[k])}")
+                            print(f"current  b:  {current_b}")
+                            print(f"Next image is observed at b: {b_sorted[j]}")
+                        if len(images_indices_left) > len(observation_points) and flag:
+                            print(f"---Warning: An image has not been detected even though it should")
+                            print(f"current  b:  {current_b}")
+                            print(f"Norm of the residual: {torch.dot(residual, residual)}")
+
+            interval = b_max - b_min
+
+        images_reconstruct = images[indices[:j+1]]
+
+        if b_max in observations.keys():
+            observation_points.append(b_max) #Change later: should be the hyperplan cloest to b_max in observations{key}
+            print(f"Observation point is in {b_max} and true point is in {b_sorted[j]}")
+
+        else:
+            print("Details error to reconsider")
+        recovered_points.append(b_min + (b_max-b_min)/2)
+        if len(recovered_points) > 1:
+                #TODO: adding a fake observation that exactly cut the space in the image, this should be replaced by the real observation
+                obs_idx = bisect.bisect_left(b_sorted.numpy(), (b_min + (b_max-b_min)/2))
+                obs_images = indices[:obs_idx]
+                alpha = np.random.uniform(-1,1, size=obs_images.shape[0])
+                alpha = torch.tensor(alpha/sum(alpha), dtype=torch.float32)
+                observation = alpha @ images[obs_images]
+                observation = observation.double()
+                orth_subspace = orth_subspace.double()
+                add_orth_comp = project_onto_orth_subspace(observation, orth_subspace)
+                print(f"added orthogonal component. Dot prodct with the previous orthogonal components: {torch.dot(add_orth_comp, orth_subspace[-1])}")
+                orth_subspace = torch.cat((orth_subspace, add_orth_comp.unsqueeze(0)), 0)
+        print(f"Found a point in {b_min + (b_max-b_min)/2} and true point is in {b_sorted[j]}, b_max for oberservation {b_max}")
+
+        b_min = b_max
+        b_max = B_max
+        interval = b_max-b_min
+
+
+def test_step_1():
+    transform = transforms.Compose(
+        [transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+    batch_size = 1024
+
+    trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+                                            download=True, transform=transform)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
+                                            shuffle=True, num_workers=2)
+    for i, data in enumerate(trainloader, 0):
+        inputs, labels = data
+        if i == 0:
+            images = torch.flatten(inputs, start_dim=1)
+        else:
+            images = torch.cat((images, torch.flatten(inputs, start_dim=1)))
+
+    num_samples = 100
+    sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
+    images_client = images[sample]
+    n_directions = 8
+
+    strips_dict = {} # dictionary in the form {"direction": [v_1, v_2, ...]}, contains real point observations.
+    directions = {} # dictionary in the form {"direction": [a_1, a_2, ...]}
+    observations_dict = {} # dictionary in the form {"direction": [observation_1, observation_2, ...]}
+    strips_b_dict = {} # dictionary in the form {"direction": [b_1, b_2, ...]}
+    # STEP 1 + 2: choose n random diretions and for each direction find a strip where the image lies.
+    for i in range(n_directions):
+            strips_b_dict[i], directions[i], observations_dict[i], strips_dict[i] = find_strips(images_client)
+
+    
+def test_projection():
+    random_matrix = torch.rand(1000, 3074)
+    matrix_rank = torch.linalg.matrix_rank(random_matrix)
+    print(f"Matrix rank: {matrix_rank}")
+    print(f" Subspace rank: {torch.linalg.matrix_rank(random_matrix[1:])}")
+    orth_subspace = random_matrix[0].unsqueeze(0)
+    for i in range(1, random_matrix.shape[0]):
+        residual = project_onto_orth_subspace(random_matrix[i], orth_subspace)
+        orth_subspace = torch.cat((orth_subspace, residual.unsqueeze(0)), 0)
+        print(f"Orthogonal subspace rank: {torch.linalg.matrix_rank(orth_subspace)}")
+        print(f"Norm of the residual: {torch.dot(residual, residual)}")
+        print(f"Dot product with all the orthogonal component for residual {i}")
+        for j in range(orth_subspace.shape[0]):
+            print(f"{j}: {torch.dot(residual, orth_subspace[j])}")
+
+
+    # random_vector = torch.rand(10)
+    # lin_dep = 0.2 * random_vector
+    # lin_ind =  torch.rand(10)
+    # print(f"Rank of the subspace ind: {torch.linalg.matrix_rank(torch.stack((random_vector, lin_ind), dim=0))}")
+    # print(f"Rank of the subspace dep: {torch.linalg.matrix_rank(torch.stack((random_vector, lin_dep), dim=0))}")
+
+    # proj_dep = projection(lin_dep, random_vector)
+    # ort_dep = lin_dep - proj_dep
+    
+    # print(f"Projection dep scalar factor: {proj_dep/ random_vector}")
+    # print(f"Ort dep norm: {torch.dot(ort_dep, ort_dep)}")
+
+    # proj_ind = projection(lin_ind, random_vector)
+    # ort_ind = lin_ind - proj_ind
+    
+    # print(f"Projection ind scalar factor: {proj_ind / random_vector}")
+    # print(f"Ort ind norm: {torch.dot(ort_ind, ort_ind)}")
+    # print(f"dot product dep:  {torch.dot(ort_dep, random_vector)}")
+    # print(f"dot product ind:  {torch.dot(ort_ind, random_vector)}")
+
+
+def shuffle_images(images):
+    """
+    Shuffle the images
+    """
+    indices = np.random.permutation(images.shape[0])
+    return images[indices], indices
+
+def test_step_3():
+    """
+    Step 3: For each strip, find n-1 strips that correspond to the same image
+    This method tests the second step of the algorithm using random matrices.
+    """
+
+    transform = transforms.Compose(
+        [transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+    batch_size = 1024
+
+    trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+                                            download=True, transform=transform)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
+                                            shuffle=True, num_workers=2)
+    for i, data in enumerate(trainloader, 0):
+        inputs, labels = data
+        if i == 0:
+            images = torch.flatten(inputs, start_dim=1)
+        else:
+            images = torch.cat((images, torch.flatten(inputs, start_dim=1)))
+
+    num_samples = 100
+    sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
+    images_client = images[sample]
+    n_directions = 100
+
+    strip_dict = {}
+    image_idx_dict = {}
+    
+    for d in range(n_directions):
+        # shuffle the images to get a random order for each direction
+        images_client, indices = shuffle_images(images_client)
+        image_idx_dict[d] = indices
+        for j in range(images_client.shape[0]):
+            real_obs = []
+            for im_left in range(len(images_client)):
+                alpha = np.random.uniform(-1,1, size=images_client[:im_left+1].shape[0])
+                alpha = torch.tensor(alpha/sum(alpha), dtype=torch.float32)
+                # using a fake observation, based on the linear combination of the images on the left
+                observation = alpha @ images_client[:im_left+1] 
+                real_obs.append(observation)
+            real_obs = torch.stack(real_obs)
+        strip_dict[d] = real_obs
+
+    # check if the observation corresponds to the same image
+    v = strip_dict[0] # fix direction v
+    v_orth = v[0].unsqueeze(0) # first element of the orthogonal supspace spanned by v
+    strip_dict.pop(0)
+
+    for i in range(v.shape[0]):
+        if i != 0:
+            residual = project_onto_orth_subspace(v[i], v_orth)
+            v_orth = torch.cat((v_orth, residual.unsqueeze(0)), 0)
+
+    corresponding_obs = {i: v[i].unsqueeze(0) for i in range(v.shape[0])}
+    for d in strip_dict.keys():
+        u = strip_dict[d]
+        for i in range(v_orth.shape[0]):
+            curr_orth = v_orth[:i +1] # select the first i orthogonal components in v_orth
+
+            not_found = True
+            j = 0
+
+            while not_found:
+                # project the observation u[j] onto the orthogonal subspace spanned by the first i orthogonal components of v
+                residual = project_onto_orth_subspace(u[j], curr_orth)
+                # if the residual is zero, then the observation u[j] is in the span of the orthogonal subspace
+                if torch.dot(residual, residual) < 1e-5:
+                    # add the observation to the corresponding observation list
+                    corresponding_obs[i] = torch.cat((corresponding_obs[i], u[j].unsqueeze(0)), 0)
+                    not_found = False
+                    u = torch.cat((u[:j], u[j+1:]), 0)
+                    print("Correspondence found")
+                    image_idx_dict[d] = np.delete(image_idx_dict[d], j)
+
+
+                else:
+                    # add the residual to the orthogonal subspace
+                    curr_orth = torch.cat((curr_orth, residual.unsqueeze(0)), 0)
+                    j += 1
+                    if j == u.shape[0]:
+                        not_found = False
+                        print(f"Warning: an image correspondence has not been detected even though it should")
+                        for i in range(curr_orth.shape[0]):
+                            print(f"Dot product with the orthogonal component {i}: {torch.dot(residual, curr_orth[i])}")
+                        print('ok')
+
+
+def test_step_4():
+
+    images, all_labels = prepare_data()
+    num_samples = 4
+    sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
+    images_client = images[sample]
+    labels_client = all_labels[sample]
+
+    n_directions = 4
+    image_size = images_client.shape[1]
+
+    model = NN(input_dim=image_size, n_classes=10, hidden_dim=n_directions)
+    model = model.double()
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+
+    b_tensor = - torch.matmul(model.fc1.weight, torch.transpose(images_client, 0, 1))
+
+    # useful for checking how good is the binary search
+    # b_sorted, indices = torch.sort(torch.tensor(b_tensor.detach().clone()), dim=1)
+
+    corresponding_strips = dict()
+
+    for i in range(images_client.shape[0]):
+        obs, dL_dA, dL_db = get_observations(images=images_client,
+                                                labels=labels_client,
+                                                model=model,
+                                                criterion=criterion,
+                                                optimizer=optimizer,
+                                                b=b_tensor[:, i] 
+                                                )
+        
+        strips = [obs[i] for i in range(obs.shape[0])]
+        corresponding_strips[i] = strips
+
+    
+
+    for k in range(1, num_samples):
+        # pick the k-the observation in direction 0
+        obs = corresponding_strips[k][0]
+        # pick the first k directions
+        a = model.fc1.weight.data[:k+1, :].detach()
+        # pick the associated kth-b coefficients
+        b = b_tensor[:k+1]
+        coefficients, image = solve_linear_system(obs, a, b, recon_images)
+        image = image / coefficients[-1]
+        recon_images = torch.cat((recon_images, image.unsqueeze(0)), dim=0)
+
+
+def plot_weights():
+    images, all_labels = prepare_data()
+    num_samples = 2
+    sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
+    images_client = images[sample]
+    labels_client = all_labels[sample]
+
+    n_directions = 1
+    image_size = images_client.shape[1]
+
+    model = NN(input_dim=image_size, n_classes=10, hidden_dim=n_directions)
+    model.fc2.bias.data = torch.tensor([10.0] * 10)
+    model = model.double()
+
+    print(model.parameters())
+
+    b_tensor = - torch.matmul(model.fc1.weight, torch.transpose(images_client, 0, 1))
+    b_sorted, indices = torch.sort(torch.tensor(b_tensor.detach().clone()), dim=1)
+    epsilon = torch.tensor([0.01] * b_tensor.shape[0])
+
+
+    # NOTE: Check this. Now using a version that is artificial
+    # b_min = torch.min(b_sorted, dim=1).values  
+    # b_min = b_sorted[1]
+    b_max = torch.max(b_sorted, dim=1).values  
+    epsilon = 1
+
+    current_b = b_max.detach().clone()  + 0.1
+    x = []
+    y = []
+    y2 = []
+    y3 = []
+    y4 = []
+    y5 = []
+    y6 = []
+    while current_b[0] <= b_max[0] + 10:
+        model.fc1.bias.data = current_b.detach().clone()
+        weights_scaled_100, _ , loss_list_100, _, _, _ = check_real_weights(images=images_client,
+                                    labels=labels_client,
+                                    model=model,
+                                    direction=0,
+                                    scale_factor = 1000,
+                                    debug=False)
+        weights_scaled, weights_not_scaled, loss_list, _, _, _ = check_real_weights(images=images_client,
+                                    labels=labels_client,
+                                    model=model,
+                                    direction=0,
+                                    scale_factor = 10,
+                                    debug=False)
+        weights_scaled_no_temp, weights_not_scaled_no_temp, loss_list_no_temp, _, _, _ = check_real_weights(images=images_client,
+                                    labels=labels_client,
+                                    model=model,
+                                    direction=0,
+                                    scale_factor = 1,
+                                    debug=True)
+        x.append(current_b[0].detach().clone())
+        y.append(weights_scaled[1][1])
+        y2.append(loss_list[1])
+        y3.append(weights_scaled_no_temp[1][1])
+        y4.append(loss_list_no_temp[1])
+        y5.append(weights_scaled_100[1][1])
+        y6.append(loss_list_100[1])
+        
+        current_b[0] += epsilon
+
+    restore_image(images_client[1], display=False)
+
+    fig, ax = plt.subplots(1, 3)
+    ax[1].plot(x, y, label='weight')
+    ax[1].plot(x, y2, label='loss')
+    # b_list = b_sorted.tolist()
+    # ax.axvline(x=b_list)
+    ax[1].set(xlabel='b', title='Alpha 2 with T=10')
+    ax[1].set_ylim([-5,5])
+    print(y)
+
+    ax[0].plot(x, y3, label='weight')
+    ax[0].plot(x, y4, label='loss')
+    ax[0].set(xlabel='b', ylabel='dL/db', title='Alpha 1 with no scaling')
+    ax[0].set_ylim([-5,5])
+
+    ax[2].plot(x, y5, label='weight')
+    ax[2].plot(x, y6, label='loss')
+    # b_list = b_sorted.tolist()
+    # ax.axvline(x=b_list)
+    ax[2].set(xlabel='b', title='Alpha 2 with T=1000')
+    ax[2].set_ylim([-5,5])
+    print(y5)
+
+    ax[0].legend()
+    ax[1].legend()
+    ax[2].legend()
+    plt.show()
+    
+
+def test_layer_modification():
+    images, all_labels = prepare_data()
+    num_samples = 2
+    sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
+    images_client = images[sample]
+    labels_client = all_labels[sample]
+
+    n_directions = 3
+    n_control_neurons = 1
+    image_size = images_client.shape[1]
+
+    model = NN(input_dim=image_size, n_classes=10, hidden_dim=n_directions+n_control_neurons)
+    model = model.double()
+
+    
+    b_tensor = - torch.matmul(model.fc1.weight, torch.transpose(images_client, 0, 1))
+    b_sorted, indices = torch.sort(torch.tensor(b_tensor.detach().clone()), dim=1)
+    epsilon = torch.tensor([0.01] * b_tensor.shape[0])
+
+    model.fc1.bias.data[n_directions:] = 1e8
+    model.fc1.bias.data[:n_directions] = b_sorted[:n_directions, -1] + 0.1
+    model.fc2.bias.data = torch.tensor([1.] * 10).double()
+    model.fc2.weight.data = (torch.ones_like(model.fc2.weight) * 0.1).double()
+
+    for i in range(n_directions):
+
+
+        weights_scaled, weights_activated, loss_list = check_real_weights(images=images_client, 
+                                                                    labels=labels_client,
+                                                                    model=model,
+                                                                    direction=i,
+                                                                    )
+        print(weights_scaled)
+
+
+
+
+
+
+
+
+
+
+
+def set_seeds(seed):
+    """
+    Set the random seed for reproducibility.
+
+    Parameters:
+    - seed (int): The random seed to be set.
+    """
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(seed)
+    random.seed(seed)    
+
+def main():
+
+    set_seeds(42)
+
+
+    # test_projection()
+
+    # test_step_1()
+    # test_step_3()
+    # step_4()
+    # test_step_4()
+    plot_weights()
+    # test_layer_modification()
+
+    # pred_list = check_predictions()
+    # print(pred_list)
+
+
+    
+
+if __name__ == "__main__":
+    main()
