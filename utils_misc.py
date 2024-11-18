@@ -113,7 +113,7 @@ def parse_args():
                         default=10,
                         help='Number of classes in the dataset.')
     
-    parser.add_argument("n_samples",
+    parser.add_argument("--n_samples",
                         type=int,
                         help="Number of samples to use for the search.")
     
