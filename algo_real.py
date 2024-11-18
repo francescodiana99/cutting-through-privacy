@@ -19,20 +19,24 @@ import math
 import argparse
 import os
 
-from utils import *
+from utils_search import *
+from utils_misc import *
+from utils_test import * 
 
 def main():
+
+    args = parse_args()
 
     set_seeds(3)
 
     images, all_labels = prepare_data()
 
-    num_samples = 100
+    num_samples = 200
     sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
     images_client = images[sample]
     labels_client = all_labels[sample]
 
-    n_directions = 100
+    n_directions = 200
 
     # STEP 1 + 2
     
@@ -47,7 +51,7 @@ def main():
     #                                             epsilon=1e-1,
     #                                             threshold=1e-6)
 
-    strips_dict, alphas, neurons, bias = find_strips_parallel(images=images_client,
+    strips_obs, strips_b, neurons, bias = find_strips_parallel(images=images_client,
                                                 labels=labels_client,
                                                 n_classes=10,
                                                 n_directions=n_directions,
@@ -61,8 +65,10 @@ def main():
                                                 
     
     # STEP 3: find corresponding strips
-
-    corresponding_strips, corresponding_bias = find_corresponding_strips(strips_dict)   
+    time_corr = time.time()
+    # corresponding_strips, corresponding_bias = find_corresponding_strips_sequential(strips_dict)   
+    corresponding_strips, corresponding_bias = find_corresponding_strips(strips_obs, strips_b)   
+    print(f"Time to find corresponding strips: {time.time() - time_corr}")
 
     # STEP 4: reconstruct images
     recon_images = corresponding_strips[0][0].unsqueeze(0)
@@ -74,7 +80,6 @@ def main():
 
     
     # show_true_images(images_client)
-
     for k in range(1, num_samples):
         # pick the k-the observation in direction 0
         obs = corresponding_strips[k][0]
@@ -82,14 +87,16 @@ def main():
         a = neurons[:k+1, :]
         # pick the associated kth-b coefficients
         b = torch.tensor(corresponding_bias[k][:k+1]).double()
-        coefficients, image = solve_linear_system(obs, a, b, recon_images)
+        time_lin_sys = time.time()
+        coefficients, image = solve_linear_system(obs, a, b, recon_images, device='cuda')
+        print(f"Time to solve linear system: {time.time() - time_lin_sys}")
         print(f"coefficients: {coefficients} | sum: {torch.sum(coefficients)}")
         image = image / coefficients[-1]
         recon_images = torch.cat((recon_images, image.unsqueeze(0)), dim=0)
-    
-    print("Showing reconstructed images")
-    for k in range(num_samples):
-        restore_images([recon_images[k], images_client[k]], display=True, title=f"Reconstructed image {k}")
+    if args.display:
+        print("Showing reconstructed images")
+        for k in range(num_samples):
+            restore_images([recon_images[k], images_client[k]], device='cuda', display=True, title=f"Reconstructed image {k}")
 
     # recon_images = reconstruct_images(corresponding_strips, images_client, n_directions)
 if __name__ == '__main__':

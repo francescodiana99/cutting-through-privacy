@@ -19,84 +19,8 @@ import argparse
 import os
 import time
 
-
-class NN(nn.Module):
-    """
-    Simple fully connected neural network with one hidden layer.
-    """
-    def __init__(self, input_dim, n_classes=100, hidden_dim=1000 ):
-        """
-        Args:
-            input_dim(int): Dimension of the input.
-            n_classes(int): Number of classes in the dataset.
-            hidden_dim(int): Dimension of the hidden layer.
-        """
-        super(NN, self).__init__()
-        self.hidden_dim = hidden_dim
-        if hidden_dim != 0:
-            self.fc1 = nn.Linear(input_dim, hidden_dim)
-            self.fc2 = nn.Linear(hidden_dim, n_classes)
-        else:
-            self.fc1 = nn.Linear(input_dim, n_classes)
-
-        torch.nn.init.uniform_(self.fc1.weight, 0, 1)
-
-    
-
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = F.relu(x)
-        if self.hidden_dim != 0:
-            x = self.fc2(x)
-        return x
-    
-
-def get_activations(acts):
-    """ 
-    Returns a hook function to store the activations of the first layers' neurons of of a model.
-    Args:
-        acts(dict): Dictionary to store the activations.
-    Returns:
-        forward_hook: Function to store the activations."""
-    def forward_hook(module, input, output):
-        for i in range(output.shape[0]):
-            acts[i] = output[i]
-    return forward_hook
-
-
-# TODO: Extend the function to support CIFAR-100 and ImageNet datasets.
-def prepare_data():
-    """
-    Prepare the CIFAR-10 dataset.
-    Returns:
-        images(torch.Tensor): Flattened images in the CIFAR-10 dataset.
-        all_labels(torch.Tensor): Labels of the images in the CIFAR-10 dataset.
-    """
-    transform = transforms.Compose(
-        [transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-
-    batch_size = 1024
-
-    trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
-                                            download=True, transform=transform)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
-                                            shuffle=True, num_workers=2)
-    
-    for i, data in enumerate(trainloader, 0):
-        inputs, labels = data
-        if i == 0:
-            all_labels = labels
-            images = torch.flatten(inputs, start_dim=1)
-        else:
-            all_labels = torch.cat((all_labels, labels))
-            images = torch.cat((images, torch.flatten(inputs, start_dim=1)))
-    
-    images = images.double()
-    labels = labels.double()
-
-    return images, all_labels
+from utils_misc import *
+from utils_test import *
 
 
 def projection(x, y):
@@ -140,7 +64,7 @@ def check_span(orth_subspace, observation, norm_threshold=1e-5, debug=False):
     return norm < norm_threshold, norm
 
 
-def find_corresponding_strips(strips_dict):
+def find_corresponding_strips_sequential(strips_dict):
     """
     Find the corresponding strips for each direction, by executing the following steps:
     1. Fix a direction v.
@@ -170,7 +94,7 @@ def find_corresponding_strips(strips_dict):
     for d in strips_dict.keys():
         u = strips_dict[d]
         for i in range(v_orth.shape[0]):
-            curr_orth = v_orth[:i + 1] # select the first i orthogonal components in v_orth
+            curr_orth = v_orth[:i + 1] # select the first i orthogonal components in v_orth (corresponding to the component at the i-th observation)
 
             not_found = True
             j = 0
@@ -202,12 +126,13 @@ def find_corresponding_strips(strips_dict):
     return corresponding_obs, corresponding_bias
 
 
-def restore_images(images, display=False, title=None):
+def restore_images(images, device='cpu', display=False, title=None):
 
-    std = torch.tensor([0.5, 0.5, 0.5])
-    mean = torch.tensor([0.5, 0.5, 0.5])
+    std = torch.tensor([0.5, 0.5, 0.5]).to(device)
+    mean = torch.tensor([0.5, 0.5, 0.5]).to(device)
     images_scaled = []
     for image in images:
+        image = image.to(device)
         image = image.view(3, 32, 32)
         image = image.permute(1, 2, 0)
         image = image * std + mean
@@ -218,7 +143,7 @@ def restore_images(images, display=False, title=None):
         fig, axs = plt.subplots(1, len(images_scaled))
 
         for i in range(len(images_scaled)):
-            axs[i].imshow(images_scaled[i])
+            axs[i].imshow((images_scaled[i].to('cpu').numpy()))
             axs[i].axis('off')
         if title is not None:
             plt.title(title)
@@ -227,7 +152,7 @@ def restore_images(images, display=False, title=None):
     return image
 
 
-def solve_linear_system(observation, directions, b, images):
+def solve_linear_system(observation, directions, b, images, device='cpu'):
     """
     Solve a linear sistem to find the k-th image.
     Args:
@@ -244,15 +169,19 @@ def solve_linear_system(observation, directions, b, images):
     k = directions.shape[0] 
     d = observation.shape[0]
 
-    X = torch.cat((torch.transpose(images, 0,1), torch.zeros(k, k-1)), dim=0)
-    b = torch.transpose(torch.cat((torch.zeros(d), b), dim=0).unsqueeze(0), 0, 1)
-    Ia = torch.cat((torch.eye(d), directions), dim=0)
+    images = images.to(device)
+    observation = observation.to(device)
+    directions = directions.to(device)
+    
+    X = torch.cat((torch.transpose(images, 0,1), torch.zeros(k, k-1).to(device)), dim=0)
+    b = torch.transpose(torch.cat((torch.zeros(d), b), dim=0).unsqueeze(0), 0, 1).to(device)
+    Ia = torch.cat((torch.eye(d).to(device), directions), dim=0)
     A = torch.cat((X, b, Ia), dim=1).double()
+    print("qua pure")
+    B = torch.cat((observation, torch.zeros(k).to(device)), dim=0).double()
 
-    B = torch.cat((observation, torch.zeros(k)), dim=0).double()
-
-    print(f"Rank of A: {torch.linalg.matrix_rank(A)}")
-
+    print(f"Rank of A: {torch.linalg.matrix_rank(A.to('cpu'))}")
+    print("e qua")
     # x = torch.linalg.lstsq(A, B, driver='gelsd')
 
     # coefficients = x[0][d:]
@@ -264,62 +193,6 @@ def solve_linear_system(observation, directions, b, images):
 
 
     return coefficients, image
-
-
-def check_real_weights(images, labels, model, direction, scale_factor=1, debug=False, display_weights=False):
-    """Get the weight distribution associated to the images in the observation"""
-    weights = []
-    dL_db_list = []
-    dL_dA_list = []
-
-    if debug: 
-        loss_list = []
-        pred_list = []
-
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-    criterion = nn.CrossEntropyLoss()
-    model.train()
-
-    for i in range(images.shape[0]):
-        optimizer.zero_grad()
-        pred = model(images[i])/scale_factor
-
-        if debug: 
-            softmax = nn.Softmax(dim=0)
-            probs = softmax(pred)
-            pred_list.append(probs)
-            loss_list.append(loss.item())
-
-        loss = criterion(pred, labels[i])
-        loss.backward()
-        dL_db = model.fc1.bias.grad[direction].detach().clone()
-        dL_dA = model.fc1.weight.grad[direction].detach().clone()
-
-        dL_db_list.append(dL_db)
-        dL_dA_list.append(dL_dA)
-        weights.append((dL_db.item()))
-
-    sum_dL_dB = sum(dL_db_list)
-    dL_dA_tensor = torch.stack(dL_dA_list)
-    obs_rec = torch.sum(dL_dA_tensor, dim=0)/sum_dL_dB
-
-    weights_activated = [(i, w) for i, w in enumerate(weights) if w != 0]  
-    weights_scaled = [(weights_activated[i][0], (weights_activated[i][1] / sum_dL_dB).item()) for i in range(len(weights_activated))]
-
-    if display_weights:
-        print(f"Weights scaled: {weights_scaled}")
-
-    if debug:
-        print("-------INSIDE CHECK_REAL_WEIGHTS-------")
-        print(f"Weights not scaled: {weights_activated}")  
-        print(f"dL_dA from check_real_weights: {torch.sum(dL_dA_tensor, dim=0)/images.shape[0]}")   
-        print(f"dL_db from check_real_weights: {sum_dL_dB/images.shape[0]}")   
-        print(f"Checking get_observation inside check_real_weights:")
-        obs_method = get_observation(images, labels, model, criterion, optimizer, model.fc1.bias, direction, debug=False)
-        print(obs_method)
-        return  weights_scaled, weights_activated, loss_list, obs_rec
-
-    return weights_scaled, obs_rec
 
 
 def get_observations(images, labels, model, criterion, optimizer, b, debug=False):
@@ -457,25 +330,6 @@ def check_predictions():
         loss
 
     return pred_list
-    
-
-def show_true_images(images):
-    """
-    Display the images in the dataset.
-    Args:
-        images(torch.Tensor): Flattened images tensor.
-    """
-    for i in range(images.shape[0]):
-        std = torch.tensor([0.5, 0.5, 0.5])
-        mean = torch.tensor([0.5, 0.5, 0.5])
-
-        image = images[i].view(3, 32, 32)
-        image = image.permute(1, 2, 0)
-        image = image * std + mean
-        plt.imshow(image)
-        plt.show()
-
-
 
 def check_multiple_observations(b_max, b, epsilon, images, labels, model, criterion, optimizer, direction, 
                                 orth_subspace):
@@ -512,50 +366,6 @@ def check_multiple_observations(b_max, b, epsilon, images, labels, model, criter
 
     return torch._stack(obs_list, dim=0)
 
-
-def get_image_gradients(images, labels, model, criterion, optimizer, b, direction):
-    """
-    Get gradients values for each image in the batch
-    """
-    model.fc1.bias.data = b.detach().clone()
-    model.train()
-    da_dL_list = []
-    db_dL_list = []
-    db_dL_large_list = []
-    db_dL_class_list = []
-    db_dA_class_list = []
-
-    for i in range(images.shape[0]):
-        optimizer.zero_grad()
-
-        preds = model(images[i])
-        loss = criterion(preds, labels[i])
-
-        loss.backward()
-        if model.fc1.bias.grad.data[direction] != 0:
-            da_dL_list.append(model.fc1.weight.grad.data[direction].detach().clone())
-            db_dL_list.append(model.fc1.bias.grad.data[direction].detach().clone())
-            db_dL_large_list.append(model.fc1.bias.grad.data[-1].detach().clone())
-            db_dA_class_list.append(model.fc2.weight.grad.data[direction].detach().clone())
-            db_dL_class_list.append(model.fc2.bias.grad.data[direction].detach().clone())
-    
-    return da_dL_list, db_dL_list, db_dL_large_list
-
-
-def set_seeds(seed):
-    """
-    Set the random seed for reproducibility.
-
-    Parameters:
-    - seed (int): The random seed to be set.
-    """
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    np.random.seed(seed)
-    random.seed(seed)    
 
 def get_observation_batched(images, labels, model, direction, b):
     "Get the observation by computing per-sample gradients in a batched fashion"
@@ -803,7 +613,6 @@ def find_strips(images, labels, n_classes, n_directions, control_bias=1e5, class
     return strips, alphas, model.fc1.weight.data, model.fc1.bias.data
 
 
-
 def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1e5, classification_weights_value=1e-1, classification_bias_value=0.1, threshold=1e-5,
                  noise_norm=None, epsilon=1e-8, device='cpu'):
     
@@ -952,8 +761,6 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
                 for i in range(search_dir.shape[0]):
                     if search_dir[i]:
                         observations_history[i][j].append((current_b[i].detach().clone(), observations[i].detach().clone(), 0))
-
-            
             else:
                 # TODO: now it is sequential, it might be parallelized, but it is not clear how to do it and if it is worth it
                 flags = (torch.ones(n_directions + 1) * -1).to(device)
@@ -966,8 +773,6 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
                 b_min = torch.where(flags == 1, current_b,  b_min)
 
                 b_max = torch.where(flags == 0, current_b,  b_max)
-                # b_min[flags == 1] = current_b[in_span_directions].detach().clone()
-                # b_max[flags == 0] = current_b[not_in_span_directions].detach().clone()
 
                 for i in range(search_dir.shape[0]):
                     if search_dir[i]:
@@ -988,3 +793,63 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
         print(f"Time to find the images: {time.time() - image_time}")
 
     return strips_obs, strips_b, model.fc1.weight.data, model.fc1.bias.data
+
+
+def find_corresponding_strips(strips_obs, strips_b, threshold=1e-5):
+    """
+    Find the corresponding strips in the orthogonal subspace.
+    Args:
+        strips_obs(torch.Tensor): Tensor containing the observations.
+        strips_b(torch.Tensor): Tensor containing the position corresponding to the observations.
+        
+        Returns:
+            corresponding_strips_obs(torch.Tensor): Tensor containing the corresponding observations.
+            corresponding_strips_b(torch.Tensor): Tensor containing the corresponding positions.
+    """
+
+    strips_dict = {i: [(strips_b[j, i], strips_obs[j, i]) for j in (range(strips_obs.shape[0])) ] for i in range(strips_obs.shape[1])}
+    v = strips_dict[0] # fix direction v
+    v_orth = v[0][1].unsqueeze(0) # first element of the orthogonal supspace spanned by v
+    strips_dict.pop(0)
+
+    for i in range(len(v)):
+        if i != 0:
+            residual = project_onto_orth_subspace(v[i][1], v_orth)
+            v_orth = torch.cat((v_orth, residual.unsqueeze(0)), 0)
+
+    corresponding_obs = {i: v[i][1].unsqueeze(0) for i in range(len(v))}
+    corresponding_bias = {i: [v[i][0].item()] for i in range(len(v))}
+    for d in strips_dict.keys():
+        u = strips_dict[d]
+        for i in range(v_orth.shape[0]):
+            curr_orth = v_orth[:i + 1] # select the first i orthogonal components in v_orth (corresponding to the component at the i-th observation)
+
+            not_found = True
+            j = 0
+
+            while not_found:
+                # project the observation u[j] onto the orthogonal subspace spanned by the first i orthogonal components of v
+                residual = project_onto_orth_subspace(u[j][1], curr_orth)
+                # if the residual is zero, then the observation u[j] is in the span of the orthogonal subspace
+                if torch.dot(residual, residual) < threshold:
+                    # add the observation to the corresponding observation list
+                    corresponding_obs[i] = torch.cat((corresponding_obs[i], u[j][1].unsqueeze(0)), 0)
+                    corresponding_bias[i].append(u[j][0].item())
+                    not_found = False
+                    corr = u.pop(j)
+                    assert torch.equal(corr[1],corresponding_obs[i][-1])
+
+
+                else:
+                    # add the residual to the orthogonal subspace
+                    curr_orth = torch.cat((curr_orth, residual.unsqueeze(0)), 0)
+                    j += 1
+                    if j == len(u):
+                        not_found = False
+                        raise ValueError(f"Warning: an image correspondence has not been detected even though it should")
+                        # no_corr_list.append(v[i])
+                        # for i in range(curr_orth.shape[0]):
+                        #     print(f"Dot product with the orthogonal component {i}: {torch.dot(residual, curr_orth[i])}")
+
+    return corresponding_obs, corresponding_bias
+        

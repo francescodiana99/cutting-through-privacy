@@ -6,7 +6,10 @@ import torchvision
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 import numpy as np
-from utils import *
+from utils_search import *
+from utils_misc import *
+from NN import NN
+from utils_test import *
 
 
 def projection(x, y):
@@ -22,28 +25,6 @@ def project_onto_orth_subspace(x, orth_subspace):
     for i in range(orth_subspace.shape[0]):
         residual -= projection(x, orth_subspace[i])
     return residual
-
-
-def check_span_artificial(observation, images_reconstructed, observation_points, orth_subspace):
-
-    """
-    Check if the observation is in the span of the images_reconstructed by projecting all the components"""
-    observation = observation.double()
-    orth_subspace = orth_subspace.double()
-    residual = project_onto_orth_subspace(observation, orth_subspace)
-
-    # for j in range(orth_subspace.shape[0]):
-    #     print(f"Dot product with the orthogonal component {j}: {torch.dot(residual, orth_subspace[j])}")
-
-    norm = torch.dot(residual, residual)
-    if norm > 1e-5:
-        flag = False
-
-    else:
-        flag = True
-
-    return flag, residual, norm
-
 
 def find_strips(images):
     image_size = images.shape[1]
