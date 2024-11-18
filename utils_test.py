@@ -4,7 +4,6 @@ from torchvision.datasets.folder import default_loader
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 import numpy as np
-from skimage.metrics import structural_similarity as ssim
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
