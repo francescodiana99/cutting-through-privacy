@@ -35,7 +35,7 @@ def main():
     images_client = images[sample]
     labels_client = all_labels[sample]
 
-    n_directions = 200
+    n_directions = args.n_samples
 
     # STEP 1 + 2
     
