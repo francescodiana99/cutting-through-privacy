@@ -31,7 +31,7 @@ def main():
 
     images, all_labels = prepare_data()
 
-    num_samples = 200
+    num_samples = args.n_samples
     sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
     images_client = images[sample]
     labels_client = all_labels[sample]
@@ -61,7 +61,7 @@ def main():
                                                 noise_norm=0,
                                                 epsilon=1e-5,
                                                 threshold=1e-6,
-                                                device='cuda')
+                                                device=args.device)
                                                 
     
     # STEP 3: find corresponding strips
@@ -88,7 +88,7 @@ def main():
         # pick the associated kth-b coefficients
         b = torch.tensor(corresponding_bias[k][:k+1]).double()
         time_lin_sys = time.time()
-        coefficients, image = solve_linear_system(obs, a, b, recon_images, device='cuda')
+        coefficients, image = solve_linear_system(obs, a, b, recon_images, device=args.device)
         print(f"Time to solve linear system: {time.time() - time_lin_sys}")
         print(f"coefficients: {coefficients} | sum: {torch.sum(coefficients)}")
         image = image / coefficients[-1]
@@ -96,7 +96,7 @@ def main():
     if args.display:
         print("Showing reconstructed images")
         for k in range(num_samples):
-            restore_images([recon_images[k], images_client[k]], device='cuda', display=True, title=f"Reconstructed image {k}")
+            restore_images([recon_images[k], images_client[k]], device=args.device, display=True, title=f"Reconstructed image {k}")
 
     # recon_images = reconstruct_images(corresponding_strips, images_client, n_directions)
 if __name__ == '__main__':
