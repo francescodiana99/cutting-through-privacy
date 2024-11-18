@@ -17,6 +17,7 @@ import random
 import math
 import argparse
 import os
+import time
 
 
 class NN(nn.Module):
@@ -159,14 +160,13 @@ def find_corresponding_strips(strips_dict):
     v_orth = v[0][1].unsqueeze(0) # first element of the orthogonal supspace spanned by v
     strips_dict.pop(0)
 
-    no_corr_list = []
-
     for i in range(len(v)):
         if i != 0:
             residual = project_onto_orth_subspace(v[i][1], v_orth)
             v_orth = torch.cat((v_orth, residual.unsqueeze(0)), 0)
 
     corresponding_obs = {i: v[i][1].unsqueeze(0) for i in range(len(v))}
+    corresponding_bias = {i: [v[i][0].item()] for i in range(len(v))}
     for d in strips_dict.keys():
         u = strips_dict[d]
         for i in range(v_orth.shape[0]):
@@ -182,6 +182,7 @@ def find_corresponding_strips(strips_dict):
                 if torch.dot(residual, residual) < 1e-5:
                     # add the observation to the corresponding observation list
                     corresponding_obs[i] = torch.cat((corresponding_obs[i], u[j][1].unsqueeze(0)), 0)
+                    corresponding_bias[i].append(u[j][0].item())
                     not_found = False
                     corr = u.pop(j)
                     assert torch.equal(corr[1],corresponding_obs[i][-1])
@@ -198,21 +199,27 @@ def find_corresponding_strips(strips_dict):
                         # for i in range(curr_orth.shape[0]):
                         #     print(f"Dot product with the orthogonal component {i}: {torch.dot(residual, curr_orth[i])}")
 
-    return corresponding_obs
+    return corresponding_obs, corresponding_bias
 
 
-def restore_image(image, display=False, title=None):
+def restore_images(images, display=False, title=None):
 
     std = torch.tensor([0.5, 0.5, 0.5])
     mean = torch.tensor([0.5, 0.5, 0.5])
-
-    image = image.view(3, 32, 32)
-    image = image.permute(1, 2, 0)
-    image = image * std + mean
+    images_scaled = []
+    for image in images:
+        image = image.view(3, 32, 32)
+        image = image.permute(1, 2, 0)
+        image = image * std + mean
+        images_scaled.append(image)
 
     if display:
-        fig = plt.figure()
-        plt.imshow(image)
+
+        fig, axs = plt.subplots(1, len(images_scaled))
+
+        for i in range(len(images_scaled)):
+            axs[i].imshow(images_scaled[i])
+            axs[i].axis('off')
         if title is not None:
             plt.title(title)
         plt.show()
@@ -237,10 +244,10 @@ def solve_linear_system(observation, directions, b, images):
     k = directions.shape[0] 
     d = observation.shape[0]
 
-    A_images = torch.cat((torch.transpose(images, 0,1), torch.zeros(k, k-1)), dim=0)
-    A_b = torch.transpose(torch.cat((torch.zeros(d), - b), dim=0).unsqueeze(0), 0, 1)
-    A_a = torch.cat((torch.eye(d), directions), dim=0)
-    A = torch.cat((A_images, A_b, A_a), dim=1).double()
+    X = torch.cat((torch.transpose(images, 0,1), torch.zeros(k, k-1)), dim=0)
+    b = torch.transpose(torch.cat((torch.zeros(d), b), dim=0).unsqueeze(0), 0, 1)
+    Ia = torch.cat((torch.eye(d), directions), dim=0)
+    A = torch.cat((X, b, Ia), dim=1).double()
 
     B = torch.cat((observation, torch.zeros(k)), dim=0).double()
 
@@ -252,8 +259,8 @@ def solve_linear_system(observation, directions, b, images):
     # image = x[0][:d]
 
     x = torch.linalg.solve(A, B)
-    coefficients = x[d:]
-    image = x[:d]
+    coefficients = x[:-d]
+    image = x[-d:]
 
 
     return coefficients, image
@@ -550,6 +557,11 @@ def set_seeds(seed):
     np.random.seed(seed)
     random.seed(seed)    
 
+def get_observation_batched(images, labels, model, direction, b):
+    "Get the observation by computing per-sample gradients in a batched fashion"
+    dL_db_list = []
+    dL_dA_list = []
+
 # TODO: Implement the function. Look at https://medium.com/pytorch/differential-privacy-series-part-2-efficient-per-sample-gradient-computation-in-opacus-5bf4031d9e22
 # https://github.com/pytorch/opacus/blob/204328947145d1759fcb26171368fcff6d652ef6/opacus/grad_sample/linear.py
 def get_observatation_no_batch(images, labels, model, direction, b):
@@ -582,6 +594,37 @@ def get_observatation_no_batch(images, labels, model, direction, b):
     obs_rec = torch.sum(dL_dA_tensor, dim=0)/sum_dL_dB
     return  obs_rec, torch.sum(dL_dA_tensor, dim=0), sum_dL_dB
 
+def get_observations_no_batch(images, labels, model, current_b):
+    """
+    Get the observation by computing sequentially oer per-sample gradients.
+    """
+
+    optimizer = torch.optim.SGD(model.parameters())
+    criterion = nn.CrossEntropyLoss()
+    model.train()
+    model.fc1.bias.data = current_b.detach().clone()
+
+    for i in range(images.shape[0]):
+        optimizer.zero_grad()
+        pred = model(images[i])
+
+        loss = criterion(pred, labels[i])
+        loss.backward()
+        dL_db_image = model.fc1.bias.grad.data.detach().clone()
+        dL_dA_image = model.fc1.weight.grad.data.detach().clone()
+
+        if i == 0:
+            dL_dA_all = dL_dA_image.unsqueeze(0)
+            dL_db_all = dL_db_image.unsqueeze(0)
+
+        else:
+            dL_dA_all = torch.cat((dL_dA_all, dL_dA_image.unsqueeze(0)), 0)
+            dL_db_all = torch.cat((dL_db_all, dL_db_image.unsqueeze(0)), 0)
+        
+    sum_dL_dB = torch.sum(dL_db_all, dim=0).view(-1, 1)
+    obs_rec = torch.sum(dL_dA_all, dim=0)/sum_dL_dB
+
+    return obs_rec, sum_dL_dB, 
 
 def check_search_direction(observation_history, max_norm, min_norm):
     
@@ -607,7 +650,8 @@ def check_search_direction(observation_history, max_norm, min_norm):
             return False
     
 
-def find_strips(images, labels, n_classes, n_directions, control_bias=1e5, classification_weights_value=1e10, classification_bias_value=0.1, threshold=1e-5):
+def find_strips(images, labels, n_classes, n_directions, control_bias=1e5, classification_weights_value=1e10, classification_bias_value=0.1, threshold=1e-5,
+                 noise_norm=None, epsilon=None):
     # TODO: improve documentation
     """
     Find observation points in all the directions.
@@ -625,6 +669,7 @@ def find_strips(images, labels, n_classes, n_directions, control_bias=1e5, class
 
     strips = {i: [] for i in range(images.shape[0])}
     orth_subspaces = {}
+    alphas = {i: [] for i in range(images.shape[0])}
 
     observations_history = {i: dict() for i in range(n_directions)}
     for i in observations_history.keys():
@@ -638,6 +683,10 @@ def find_strips(images, labels, n_classes, n_directions, control_bias=1e5, class
     # classification layer modeifications to keep the output controlled by the previous bias
     if classification_weights_value is not None:
         model.fc2.weight.data = (torch.ones_like(model.fc2.weight) * classification_weights_value).double()
+
+    if noise_norm is not None:
+        noise = torch.randn_like(model.fc2.weight) * noise_norm
+        model.fc2.weight.data += noise
     if classification_bias_value is not None:
         model.fc2.bias.data = (torch.ones_like(model.fc2.bias) * classification_bias_value).double()
 
@@ -645,8 +694,11 @@ def find_strips(images, labels, n_classes, n_directions, control_bias=1e5, class
 
     # useful for checking the binary search accuracy
     b_sorted, indices = torch.sort(torch.tensor(b_tensor.detach().clone()), dim=1)
-
-    epsilon = torch.min(torch.abs(b_sorted[:, 1:] - b_sorted[:, :-1]), 1).values
+    
+    if epsilon is None:
+        epsilon = torch.min(torch.abs(b_sorted[:, 1:] - b_sorted[:, :-1]), 1).values
+    else:
+        epsilon = torch.ones_like(b_sorted[0]).double() * epsilon
 
     # NOTE: Check this. Now using a version that is artificial
     b_min = torch.min(b_sorted, dim=1).values  - 100
@@ -654,15 +706,14 @@ def find_strips(images, labels, n_classes, n_directions, control_bias=1e5, class
     B_max = b_max.detach().clone()
     interval = b_max - b_min
 
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.001)
-
     for j in range(images.shape[0]):
         print(f"------Round {j}------")     
+        init_time = time.time()
         current_b = b_min + (b_max - b_min) / 2
         current_b[n_directions:] = control_bias
 
         for i in range(n_directions):
+            image_start_time = time.time()
             print(f"-----Direction {i}-----")
             found_image = False
             # if we have found the first image, we can initialize the orthogonal subspace
@@ -683,7 +734,9 @@ def find_strips(images, labels, n_classes, n_directions, control_bias=1e5, class
                         orth_subspaces[i] = obs.unsqueeze(0)
 
                     else:
+                        time_span = time.time()
                         flag, norm = check_span(orth_subspaces[i], obs, norm_threshold=threshold, debug=False)
+                        print(f"Time to check span: {time.time() - time_span}")
                         if flag:
                             current_b[i] = b_max[i].item()
                             obs, dL_dA, dL_db = get_observatation_no_batch(images, labels, model, i, current_b)
@@ -697,7 +750,13 @@ def find_strips(images, labels, n_classes, n_directions, control_bias=1e5, class
 
                     strips[i].append((current_b[i], obs))
                     found_image = True
+                    weights, _ = check_real_weights(images, labels, model, i, scale_factor=1, debug=False)
+                    alphas[i].append(weights)
+
                     print(f"Found image at position {current_b[i].item()} ")
+                    print(f"Time to find the image: {time.time() - image_start_time}")
+                    if abs(current_b[i].item() - b_sorted[i, j].item()) > epsilon[i]:
+                        raise ValueError("Warning: Error in the binary search")
                     break
                 
 
@@ -739,17 +798,193 @@ def find_strips(images, labels, n_classes, n_directions, control_bias=1e5, class
             b_min[i] = b_max[i].item()
             b_max[i] = B_max[i].item()
             interval[i] = b_max[i].item() - b_min[i].item()
+        print(f"Time to find the images: {time.time() - init_time}")
 
-    return strips, model.fc1.weight.data, model.fc1.bias.data
+    return strips, alphas, model.fc1.weight.data, model.fc1.bias.data
+
+
+
+def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1e5, classification_weights_value=1e-1, classification_bias_value=0.1, threshold=1e-5,
+                 noise_norm=None, epsilon=1e-8, device='cpu'):
+    
+    """
+    Find observation points in all the directions. This version uses a parallel search for each direction.
+
+    Args:
+        images(torch.Tensor): Flattened images tensor.
+        labels(torch.Tensor): Labels tensor.
+        n_classes(int): Number of classes in the dataset.
+        n_directions(int): Number of directions to consider.
+        control_bias(float): Bias value to control the output distribution.
+        classification_weights_value(float): Value of the classification weights.
+        classification_bias_value(float): Value of the classification bias.
+        threshold(float): Threshold value to check the norm of the orthogonal component.
+        noise_norm(float): Noise value to add to the classification weights.
+        epsilon(float): stopping threshold for the binary search.
+        
+        Returns
+            strips_obs(dict): Tensor containing the observations.
+            strips_b(dict): Tensor containing the position corresponding to the observations.
+            neurons(torch.Tensor): Weights of the neural network.
+            bias(torch.Tensor): Bias of the neural network.
+    """
+
+    image_size = images.shape[1]
+    images = images.to(device)
+    labels = labels.to(device)
+    
+    strips_obs = torch.zeros( n_directions, n_directions + 1, images.shape[1]).double().to(device)
+    strips_b = torch.zeros(n_directions, n_directions + 1).double().to(device)
+    orth_subspaces = torch.zeros(n_directions, n_directions + 1, images.shape[1]).double().to(device)
+    alphas = {i: [] for i in range(images.shape[0])}
+
+    observations_history = {i: dict() for i in range(n_directions)}
+    for i in observations_history.keys():
+        observations_history[i] = {j: [] for j in range(images.shape[0])}
+    
+    model = NN(input_dim=image_size, n_classes=n_classes, hidden_dim=n_directions + 1)
+    model = model.double().to(device)
+
+    # bias that controls outputs distribution
+    model.fc1.bias.data[n_directions:] = control_bias
+    # classification layer modeifications to keep the output controlled by the previous bias
+    if classification_weights_value is not None:
+        model.fc2.weight.data = (torch.ones_like(model.fc2.weight) * classification_weights_value).double()
+
+    if noise_norm is not None:
+        noise = torch.randn_like(model.fc2.weight) * noise_norm
+        model.fc2.weight.data += noise
+    if classification_bias_value is not None:
+        model.fc2.bias.data = (torch.ones_like(model.fc2.bias) * classification_bias_value).double()
+
+    b_tensor = - torch.matmul(model.fc1.weight, torch.transpose(images, 0, 1))
+
+    # useful for checking the binary search accuracy
+    b_sorted, indices = torch.sort(torch.tensor(b_tensor.detach().clone()), dim=1)
+
+    epsilon = torch.ones_like(model.fc1.bias.data).double() * epsilon
+
+    # TODO: Check this. Now using a version that is artificial
+    b_min = torch.min(b_sorted, dim=1).values  - 100
+    b_max = torch.max(b_sorted, dim=1).values  + 100
+    B_max = b_max.detach().clone()
+    interval = b_max - b_min
+
+    for j in range(images.shape[0]):
+        image_time = time.time()
+        print(f"------Round {j}------")
+        # mask to keep track of the directions where we have already found the image
+        search_dir = torch.ones(n_directions+1).bool().to(device)
+        search_dir[-1] = False
+
+        while not torch.all(~search_dir):
+
+            current_b = b_min.detach().clone() + (b_max.detach().clone() - b_min.detach().clone()) / 2
+            current_b[n_directions:] = control_bias
+
+            observations, dL_db = get_observations_no_batch(images=images,
+                                                          labels=labels,
+                                                          model=model,
+                                                          current_b=current_b)
+            
+            stop_search_mask = interval < epsilon / 2
+            stop_search_mask[-1] = False
+            if torch.any(stop_search_mask):
+                stop_indices = torch.nonzero(stop_search_mask, as_tuple=False)
                 
+                if j == 0:
+                    # first image, we need to ensure to stop on the left of the image
+                    non_active_mask = dL_db[stop_search_mask] == 0
+                    if torch.any(non_active_mask):
+                        # no image is activated, we move right
+                        current_b[stop_indices[non_active_mask]] = b_max[stop_indices[non_active_mask]]
+                        observations, _ = get_observations_no_batch(images=images,
+                                                                    labels=labels,
+                                                                    model=model,
+                                                                    current_b=current_b)
+                        for i in range(stop_search_mask.shape[0]):
+                            if stop_search_mask[i] and non_active_mask[i]:
+                                observations_history[i][j].append((current_b[i].detach().clone(), observations[i].detach().clone(), 0))
+
+                else:
+                    # TODO: code this case (stopped right to the real image)
+                    for i in range(stop_search_mask.shape[0]):
+                        if stop_search_mask[i]:
+                            flags[i], _ = check_span(orth_subspaces[i, :j], observations[i], norm_threshold=threshold, debug=False)
+                    if torch.any(flags == 1):
+                        current_b = torch.where(flags == 1, b_max, current_b)
+                        observations, _ = get_observations_no_batch(images=images,
+                                                                    labels=labels,
+                                                                    model=model,
+                                                                    current_b=current_b)
+                        for i in range(stop_search_mask.shape[0]):
+                            if stop_search_mask[i].item() is True and flags[i] == 1:
+                                observations_history[i][j].append((current_b[i].detach().clone(), observations[i].detach().clone(), 0))
+                                flags[i], _ = check_span(orth_subspaces[i, :j], observations[i], norm_threshold=threshold, debug=False)
+                                if flags[i]:
+                                    raise ValueError("Warning: the observation is in the span, something is wrong")
+                                
+                        for i in range(stop_indices.shape[0]):
+                            orth_comp = project_onto_orth_subspace(observations[i], orth_subspaces[i, :j])
+                            orth_subspaces[i, j, :] = orth_comp.detach().clone()
+
+                
+                strips_b[j, stop_indices] = current_b[stop_indices].detach().clone()
+                strips_obs[j, stop_indices, :] = observations[stop_indices].detach().clone()
+                search_dir[stop_indices] = False
+                search_dir[-1] = False
+
+                for i in stop_indices:
+                    print(f"Found image in direction {i.item()} at position {current_b[i].item()} | Real position {b_sorted[i, j].item()}")
+                    if abs(current_b[i].item() - b_sorted[i, j].item()) > epsilon[i]:
+                        raise ValueError("Warning: Error in the binary search")
+
+                if torch.all(~search_dir):
+                    break
+
+
+            # check in which direction to move
+            # search for the first image in each direction (mask found_in_all_dir helps to skip the directions where we have already found the image)
+            if j == 0:
+                b_min = torch.where(dL_db.squeeze() * search_dir.double() == 0, current_b, b_min)
+                b_max = torch.where(dL_db.squeeze() * search_dir.double() != 0, current_b, b_max)
+                
+                for i in range(search_dir.shape[0]):
+                    if search_dir[i]:
+                        observations_history[i][j].append((current_b[i].detach().clone(), observations[i].detach().clone(), 0))
+
             
-            
+            else:
+                # TODO: now it is sequential, it might be parallelized, but it is not clear how to do it and if it is worth it
+                flags = (torch.ones(n_directions + 1) * -1).to(device)
+                for i in range(search_dir.shape[0] -1):
+                    if search_dir[i]:
+                        flags[i], _ = check_span(orth_subspaces[i, :j], observations[i], norm_threshold=threshold, debug=False)
+                        if current_b[i] > b_sorted[i, j].item() and flags[i]:
+                            raise ValueError("Warning: this observation should not be in the span, however it is")
 
+                b_min = torch.where(flags == 1, current_b,  b_min)
 
+                b_max = torch.where(flags == 0, current_b,  b_max)
+                # b_min[flags == 1] = current_b[in_span_directions].detach().clone()
+                # b_max[flags == 0] = current_b[not_in_span_directions].detach().clone()
 
+                for i in range(search_dir.shape[0]):
+                    if search_dir[i]:
+                        observations_history[i][j].append((current_b[i], observations[i], 0)) 
 
+            interval = b_max - b_min
+        if j == 0:
+            orth_subspaces[:, 0, :] = observations[:-1, :].detach().clone() # we do not need the last observation (from the control bias)
+        else:
+            for i in range(n_directions):
+                orth_comp = project_onto_orth_subspace(observations[i], orth_subspaces[i, :j])
+                orth_subspaces[i, j, :] = orth_comp.detach().clone()
+    
+        b_min = b_max.detach().clone()
+        b_max = B_max.detach().clone()
+        interval = b_max - b_min
 
+        print(f"Time to find the images: {time.time() - image_time}")
 
-
-
-               
+    return strips_obs, strips_b, model.fc1.weight.data, model.fc1.bias.data
