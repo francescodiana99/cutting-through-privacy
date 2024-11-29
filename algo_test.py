@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from utils_search import *
 from utils_misc import *
-from NN import NN
 from utils_test import *
 
 
@@ -480,12 +479,51 @@ def test_layer_modification():
         print(weights_scaled)
 
 
+def test_one_direction_attack():
+    args = parse_args()
 
+    # set_seeds(3)
 
+    images, all_labels = prepare_data()
 
+    num_samples = 400
+    sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
+    images_client = images[sample]
+    labels_client = all_labels[sample]
 
+    strips_obs, strips_b, neurons, bias = find_strips_parallel(images=images_client,
+                                                labels=labels_client,
+                                                n_classes=10,
+                                                n_directions=1,
+                                                classification_weights_value=1,
+                                                classification_bias_value=1e-5,
+                                                control_bias=5e5,
+                                                noise_norm=0,
+                                                epsilon=1e-5,
+                                                threshold=1e-6,
+                                                directions_weights_value=1,
+                                                device='cuda')
+    
+    print("First_step_ok")
 
+    # show_true_images(images_client)
+    
+    images_reconstructed = [strips_obs[0, 0]]
+    print(get_ssim(images_client[0], strips_obs[0, 0]))
+    restore_images([images_reconstructed[0], images_client[0]], device=args.device, display=True, title="Reconstructed image 0")
+    for k in range(1, num_samples):
+        obs = strips_obs[k, 0]
+        recon_image = (k + 1) * (obs - (sum(images_reconstructed)/ (k+1)))
+        images_reconstructed.append(recon_image)
+    
 
+    paired_images = couple_images(images_reconstructed, images_client)
+    for k in range(num_samples):
+        ssim = get_ssim(paired_images[k][0], paired_images[k][1])
+        print(f"SSIM for image {k}: {ssim}")
+        # restore_images([paired_images[k][0], paired_images[k][1]], device=args.device, display=True, title=f"Reconstructed image {k}| SSIM: {ssim}")
+
+        
 
 
 
@@ -506,7 +544,7 @@ def set_seeds(seed):
 
 def main():
 
-    set_seeds(42)
+    set_seeds(3)
 
 
     # test_projection()
@@ -515,14 +553,30 @@ def main():
     # test_step_3()
     # step_4()
     # test_step_4()
-    plot_weights()
+    # test_one_direction_attack()
     # test_layer_modification()
+    test_image_isolation(5000)
 
     # pred_list = check_predictions()
     # print(pred_list)
 
 
-    
+def test_image_isolation(n_samples=50000): 
+    images, all_labels = prepare_data() 
+    images = images.to('cuda')
+    # rnd_idx = np.random.choice(images.shape[0], size=n_samples, replace=False)
+    # images_client = images[rnd_idx].to('cuda')
+    # labels_client = all_labels[rnd_idx].to('cuda')
+    A = torch.randn(50000, images.shape[1]).to('cuda')
+    # print(torch.linalg.matrix_rank(A))
+    b_tensor = - torch.matmul(A, torch.transpose(images, 0, 1))
+    min_idx = torch.argmin(b_tensor, dim=1)
+    # print(b_tensor)
+    # print(b_tensor.shape)
+    uniques = torch.unique(min_idx, return_counts=False)
+    plt.hist(min_idx.cpu().detach().numpy(), bins=uniques.shape[0])
+    plt.show()
+    print(min_idx)
 
 if __name__ == "__main__":
     main()

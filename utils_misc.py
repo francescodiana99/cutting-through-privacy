@@ -23,7 +23,7 @@ class NN(nn.Module):
     """
     Simple fully connected neural network with one hidden layer.
     """
-    def __init__(self, input_dim, n_classes=100, hidden_dim=1000 ):
+    def __init__(self, input_dim, n_classes=100, hidden_dim=1000, weight_scale=1):
         """
         Args:
             input_dim(int): Dimension of the input.
@@ -38,10 +38,7 @@ class NN(nn.Module):
         else:
             self.fc1 = nn.Linear(input_dim, n_classes)
 
-        torch.nn.init.uniform_(self.fc1.weight, 0, 1)
-
-    
-
+        torch.nn.init.uniform_(self.fc1.weight, 0, 1*weight_scale)
 
     def forward(self, x):
         x = self.fc1(x)

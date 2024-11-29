@@ -176,11 +176,9 @@ def solve_linear_system(observation, directions, b, images, device='cpu'):
     b = torch.transpose(torch.cat((torch.zeros(d), b), dim=0).unsqueeze(0), 0, 1).to(device)
     Ia = torch.cat((torch.eye(d).to(device), directions), dim=0)
     A = torch.cat((X, b, Ia), dim=1).double()
-    print("qua pure")
     B = torch.cat((observation, torch.zeros(k).to(device)), dim=0).double()
 
     print(f"Rank of A: {torch.linalg.matrix_rank(A.to('cpu'))}")
-    print("e qua")
     # x = torch.linalg.lstsq(A, B, driver='gelsd')
 
     # coefficients = x[0][d:]
@@ -365,12 +363,6 @@ def check_multiple_observations(b_max, b, epsilon, images, labels, model, criter
 
     return torch._stack(obs_list, dim=0)
 
-
-def get_observation_batched(images, labels, model, direction, b):
-    "Get the observation by computing per-sample gradients in a batched fashion"
-    dL_db_list = []
-    dL_dA_list = []
-
 # TODO: Implement the function. Look at https://medium.com/pytorch/differential-privacy-series-part-2-efficient-per-sample-gradient-computation-in-opacus-5bf4031d9e22
 # https://github.com/pytorch/opacus/blob/204328947145d1759fcb26171368fcff6d652ef6/opacus/grad_sample/linear.py
 def get_observatation_no_batch(images, labels, model, direction, b):
@@ -403,9 +395,9 @@ def get_observatation_no_batch(images, labels, model, direction, b):
     obs_rec = torch.sum(dL_dA_tensor, dim=0)/sum_dL_dB
     return  obs_rec, torch.sum(dL_dA_tensor, dim=0), sum_dL_dB
 
-def get_observations_no_batch(images, labels, model, current_b):
+def get_observations_no_batch(images, labels, model, current_b, display=False):
     """
-    Get the observation by computing sequentially oer per-sample gradients.
+    Get the observation by computing sequentially per per-sample gradients.
     """
 
     optimizer = torch.optim.SGD(model.parameters())
@@ -429,6 +421,10 @@ def get_observations_no_batch(images, labels, model, current_b):
         else:
             dL_dA_all = torch.cat((dL_dA_all, dL_dA_image.unsqueeze(0)), 0)
             dL_db_all = torch.cat((dL_db_all, dL_db_image.unsqueeze(0)), 0)
+    
+    if display:
+        print(f"db: {dL_db_all}")
+        print(f"dA: {dL_dA_all}")
         
     sum_dL_dB = torch.sum(dL_db_all, dim=0).view(-1, 1)
     obs_rec = torch.sum(dL_dA_all, dim=0)/sum_dL_dB
@@ -612,7 +608,7 @@ def find_strips(images, labels, n_classes, n_directions, control_bias=1e5, class
     return strips, alphas, model.fc1.weight.data, model.fc1.bias.data
 
 
-def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1e5, classification_weights_value=1e-1, classification_bias_value=0.1, threshold=1e-5,
+def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1e5, directions_weights_value = 1, classification_weights_value=1e-1, classification_bias_value=0.1, threshold=1e-5,
                  noise_norm=None, epsilon=1e-8, device='cpu'):
     
     """
@@ -641,16 +637,17 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
     images = images.to(device)
     labels = labels.to(device)
     
-    strips_obs = torch.zeros( n_directions, n_directions + 1, images.shape[1]).double().to(device)
-    strips_b = torch.zeros(n_directions, n_directions + 1).double().to(device)
-    orth_subspaces = torch.zeros(n_directions, n_directions + 1, images.shape[1]).double().to(device)
+    strips_obs = torch.zeros( images.shape[0], n_directions, images.shape[1]).double().to(device)
+    # TODO: swap directions for consistency
+    strips_b = torch.zeros(images.shape[0], n_directions).double().to(device)
+    orth_subspaces = torch.zeros(n_directions, images.shape[0], images.shape[1]).double().to(device)
     alphas = {i: [] for i in range(images.shape[0])}
 
     observations_history = {i: dict() for i in range(n_directions)}
     for i in observations_history.keys():
         observations_history[i] = {j: [] for j in range(images.shape[0])}
     
-    model = NN(input_dim=image_size, n_classes=n_classes, hidden_dim=n_directions + 1)
+    model = NN(input_dim=image_size, n_classes=n_classes, hidden_dim=n_directions + 1, weight_scale=directions_weights_value)
     model = model.double().to(device)
 
     # bias that controls outputs distribution
@@ -693,7 +690,8 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
             observations, dL_db = get_observations_no_batch(images=images,
                                                           labels=labels,
                                                           model=model,
-                                                          current_b=current_b)
+                                                          current_b=current_b,
+                                                          )
             
             stop_search_mask = interval < epsilon / 2
             stop_search_mask[-1] = False
@@ -702,16 +700,17 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
                 
                 if j == 0:
                     # first image, we need to ensure to stop on the left of the image
-                    non_active_mask = dL_db[stop_search_mask] == 0
+                    non_active_mask = ((dL_db.squeeze() == 0) & stop_search_mask)
                     if torch.any(non_active_mask):
                         # no image is activated, we move right
-                        current_b[stop_indices[non_active_mask]] = b_max[stop_indices[non_active_mask]]
+                        current_b = torch.where(non_active_mask, b_max, current_b)
+                        # current_b[stop_indices[non_active_mask]] = b_max[stop_indices[non_active_mask]]
                         observations, _ = get_observations_no_batch(images=images,
                                                                     labels=labels,
                                                                     model=model,
                                                                     current_b=current_b)
                         for i in range(stop_search_mask.shape[0]):
-                            if stop_search_mask[i] and non_active_mask[i]:
+                            if  non_active_mask[i]:
                                 observations_history[i][j].append((current_b[i].detach().clone(), observations[i].detach().clone(), 0))
 
                 else:
@@ -732,8 +731,8 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
                                 if flags[i]:
                                     raise ValueError("Warning: the observation is in the span, something is wrong")
                                 
-                        for i in range(stop_indices.shape[0]):
-                            orth_comp = project_onto_orth_subspace(observations[i], orth_subspaces[i, :j])
+                        for i in stop_indices:
+                            orth_comp = project_onto_orth_subspace(observations[i.item()], orth_subspaces[i.item(), :j])
                             orth_subspaces[i, j, :] = orth_comp.detach().clone()
 
                 

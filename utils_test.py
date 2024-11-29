@@ -19,6 +19,8 @@ import os
 import time
 from utils_search import *
 
+from skimage.metrics import structural_similarity as ssim
+
 
 def check_span_artificial(observation, images_reconstructed, observation_points, orth_subspace):
 
@@ -155,4 +157,29 @@ def get_image_gradients(images, labels, model, criterion, optimizer, b, directio
     
     return da_dL_list, db_dL_list, db_dL_large_list
 
+
+def get_ssim(img_1, img_2):
+    """
+    Restore the original shape of img_1 and img_2 and compute the SSIM between them."""
+
+    H, W, C = 32, 32, 3
+
+    img_1 = img_1.cpu().reshape(H, W, C).numpy()
+    img_2 = img_2.cpu().reshape(H, W, C).numpy()
+
+    ssim_metric = ssim(img_1, img_2, channel_axis=2, data_range=1) 
+    return ssim_metric
+
+
+def couple_images(img_1_list, img_2_list):
+    """
+    Find the correspondencies between images, according to SSIM"""
+    couples = []
+    for i in range(len(img_1_list)):
+        img_1 = img_1_list[i]
+        ssim_list = [get_ssim(img_1, img_2) for img_2 in img_2_list]
+        max_ssim = max(ssim_list)
+        idx = ssim_list.index(max_ssim)
+        couples.append((img_1_list[i], img_2_list[idx]))
+    return couples
 

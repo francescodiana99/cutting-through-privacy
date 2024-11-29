@@ -54,12 +54,13 @@ def main():
                                                 labels=labels_client,
                                                 n_classes=10,
                                                 n_directions=n_directions,
-                                                classification_weights_value=1e+4,
-                                                classification_bias_value=1e-3,
-                                                control_bias=500,
+                                                classification_weights_value=1,
+                                                classification_bias_value=1e-5,
+                                                control_bias=5e5,
                                                 noise_norm=0,
                                                 epsilon=1e-5,
                                                 threshold=1e-6,
+                                                directions_weights_value=1,
                                                 device=args.device)
                                                 
     
