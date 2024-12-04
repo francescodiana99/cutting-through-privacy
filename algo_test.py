@@ -6,7 +6,9 @@ import torchvision
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 import numpy as np
-from utils import *
+from utils_search import *
+from utils_misc import *
+from utils_test import *
 
 
 def projection(x, y):
@@ -22,28 +24,6 @@ def project_onto_orth_subspace(x, orth_subspace):
     for i in range(orth_subspace.shape[0]):
         residual -= projection(x, orth_subspace[i])
     return residual
-
-
-def check_span_artificial(observation, images_reconstructed, observation_points, orth_subspace):
-
-    """
-    Check if the observation is in the span of the images_reconstructed by projecting all the components"""
-    observation = observation.double()
-    orth_subspace = orth_subspace.double()
-    residual = project_onto_orth_subspace(observation, orth_subspace)
-
-    # for j in range(orth_subspace.shape[0]):
-    #     print(f"Dot product with the orthogonal component {j}: {torch.dot(residual, orth_subspace[j])}")
-
-    norm = torch.dot(residual, residual)
-    if norm > 1e-5:
-        flag = False
-
-    else:
-        flag = True
-
-    return flag, residual, norm
-
 
 def find_strips(images):
     image_size = images.shape[1]
@@ -499,12 +479,51 @@ def test_layer_modification():
         print(weights_scaled)
 
 
+def test_one_direction_attack():
+    args = parse_args()
 
+    # set_seeds(3)
 
+    images, all_labels = prepare_data()
 
+    num_samples = 100
+    sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
+    images_client = images[sample]
+    labels_client = all_labels[sample]
 
+    strips_obs, strips_b, neurons, bias = find_strips_parallel(images=images_client,
+                                                labels=labels_client,
+                                                n_classes=10,
+                                                n_directions=1,
+                                                classification_weights_value=1,
+                                                classification_bias_value=1e-5,
+                                                control_bias=5e5,
+                                                noise_norm=0,
+                                                epsilon=1e-5,
+                                                threshold=1e-6,
+                                                directions_weights_value=1,
+                                                device='cuda')
+    
+    print("First_step_ok")
 
+    # show_true_images(images_client)
+    
+    images_reconstructed = [strips_obs[0, 0]]
+    print(get_ssim(images_client[0], strips_obs[0, 0]))
+    restore_images([images_reconstructed[0], images_client[0]], device=args.device, display=True, title="Reconstructed image 0")
+    for k in range(1, num_samples):
+        obs = strips_obs[k, 0]
+        recon_image = (k + 1) * (obs - (sum(images_reconstructed)/ (k+1)))
+        images_reconstructed.append(recon_image)
+    
 
+    paired_images = couple_images(images_reconstructed, images_client)
+    for k in range(num_samples):
+        ssim = get_ssim(paired_images[k][0], paired_images[k][1])
+        print(f"SSIM for image {k}: {ssim}")
+        # restore_images([paired_images[k][0], paired_images[k][1]], device=args.device, display=True, title=f"Reconstructed image {k}| SSIM: {ssim}")
+
+        
 
 
 
@@ -534,14 +553,45 @@ def main():
     # test_step_3()
     # step_4()
     # test_step_4()
-    plot_weights()
+    # test_one_direction_attack()
     # test_layer_modification()
+    # test_image_isolation(1024, n_trials=10000, var=10)
 
     # pred_list = check_predictions()
     # print(pred_list)
 
 
-    
+def test_image_isolation(n_samples=30000, n_trials=10, var=1): 
+    images, all_labels = prepare_data() 
+    images = images.to('cuda').float()
+    rnd_idx = np.random.choice(images.shape[0], size=n_samples, replace=False)
+    images = images[rnd_idx].to('cuda')
+    labels = all_labels[rnd_idx].to('cuda')
+    for i in range(n_trials):
+        A = (2 * torch.rand(10000, images.shape[1]) - 1).to('cuda')
+        # A = torch.normal(0, var, size=(10000, images.shape[1])).to('cuda')
+        b_tensor = - torch.matmul(A, torch.transpose(images, 0, 1))
+        min_idx = torch.argmin(b_tensor, dim=1)
+        if i == 0:
+            act_hist = min_idx.clone()
+        else:
+            act_hist = torch.cat((act_hist, min_idx), dim=0)
+    # print(b_tensor)
+    # print(b_tensor.shape)
+    uniques, counts = torch.unique(act_hist, return_counts=True)
+    labels_act = labels[uniques]
+    unique_labels, count_labels = torch.unique(labels_act, return_counts=True)
+    print(f"Number of isolated images: {uniques.shape[0]}")
+    print(f"Most isolated image: {torch.argmax(counts)} | Number of isolations: {torch.max(counts)}")
+    print(f"Least isolated image: {torch.argmin(counts)} | Number of isolations: {torch.min(counts)}")
+    print(f"Avg number of isolations: {torch.sum(counts)/n_samples}")
+    print(f"Number of unique labels: {unique_labels.shape[0]}")
+    print(f"Most isolated label: {torch.argmax(count_labels)} | Number of isolations: {torch.max(count_labels)}")
+    print(f"Least isolated label: {torch.argmin(count_labels)} | Number of isolations: {torch.min(count_labels)}")
+    plt.hist(act_hist.cpu().detach().numpy(), bins=n_samples)
+    plt.show()
+    plt.hist(labels_act.cpu(), bins=unique_labels.shape[0])
+    plt.show()
 
 if __name__ == "__main__":
     main()
