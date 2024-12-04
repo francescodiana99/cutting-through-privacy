@@ -743,6 +743,7 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
 
                 for i in stop_indices:
                     print(f"Found image in direction {i.item()} at position {current_b[i].item()} | Real position {b_sorted[i, j].item()}")
+                    check_real_weights(images, labels, model, direction=i, debug=True)
                     if abs(current_b[i].item() - b_sorted[i, j].item()) > epsilon[i]:
                         raise ValueError("Warning: Error in the binary search")
 

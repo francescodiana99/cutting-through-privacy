@@ -486,7 +486,7 @@ def test_one_direction_attack():
 
     images, all_labels = prepare_data()
 
-    num_samples = 400
+    num_samples = 100
     sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
     images_client = images[sample]
     labels_client = all_labels[sample]
@@ -544,7 +544,7 @@ def set_seeds(seed):
 
 def main():
 
-    set_seeds(3)
+    set_seeds(42)
 
 
     # test_projection()
@@ -555,28 +555,43 @@ def main():
     # test_step_4()
     # test_one_direction_attack()
     # test_layer_modification()
-    test_image_isolation(5000)
+    # test_image_isolation(1024, n_trials=10000, var=10)
 
     # pred_list = check_predictions()
     # print(pred_list)
 
 
-def test_image_isolation(n_samples=50000): 
+def test_image_isolation(n_samples=30000, n_trials=10, var=1): 
     images, all_labels = prepare_data() 
-    images = images.to('cuda')
-    # rnd_idx = np.random.choice(images.shape[0], size=n_samples, replace=False)
-    # images_client = images[rnd_idx].to('cuda')
-    # labels_client = all_labels[rnd_idx].to('cuda')
-    A = torch.randn(50000, images.shape[1]).to('cuda')
-    # print(torch.linalg.matrix_rank(A))
-    b_tensor = - torch.matmul(A, torch.transpose(images, 0, 1))
-    min_idx = torch.argmin(b_tensor, dim=1)
+    images = images.to('cuda').float()
+    rnd_idx = np.random.choice(images.shape[0], size=n_samples, replace=False)
+    images = images[rnd_idx].to('cuda')
+    labels = all_labels[rnd_idx].to('cuda')
+    for i in range(n_trials):
+        A = (2 * torch.rand(10000, images.shape[1]) - 1).to('cuda')
+        # A = torch.normal(0, var, size=(10000, images.shape[1])).to('cuda')
+        b_tensor = - torch.matmul(A, torch.transpose(images, 0, 1))
+        min_idx = torch.argmin(b_tensor, dim=1)
+        if i == 0:
+            act_hist = min_idx.clone()
+        else:
+            act_hist = torch.cat((act_hist, min_idx), dim=0)
     # print(b_tensor)
     # print(b_tensor.shape)
-    uniques = torch.unique(min_idx, return_counts=False)
-    plt.hist(min_idx.cpu().detach().numpy(), bins=uniques.shape[0])
+    uniques, counts = torch.unique(act_hist, return_counts=True)
+    labels_act = labels[uniques]
+    unique_labels, count_labels = torch.unique(labels_act, return_counts=True)
+    print(f"Number of isolated images: {uniques.shape[0]}")
+    print(f"Most isolated image: {torch.argmax(counts)} | Number of isolations: {torch.max(counts)}")
+    print(f"Least isolated image: {torch.argmin(counts)} | Number of isolations: {torch.min(counts)}")
+    print(f"Avg number of isolations: {torch.sum(counts)/n_samples}")
+    print(f"Number of unique labels: {unique_labels.shape[0]}")
+    print(f"Most isolated label: {torch.argmax(count_labels)} | Number of isolations: {torch.max(count_labels)}")
+    print(f"Least isolated label: {torch.argmin(count_labels)} | Number of isolations: {torch.min(count_labels)}")
+    plt.hist(act_hist.cpu().detach().numpy(), bins=n_samples)
     plt.show()
-    print(min_idx)
+    plt.hist(labels_act.cpu(), bins=unique_labels.shape[0])
+    plt.show()
 
 if __name__ == "__main__":
     main()
