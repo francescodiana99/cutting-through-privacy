@@ -73,6 +73,7 @@ def check_real_weights(images, labels, model, direction, scale_factor=1, debug=F
     for i in range(images.shape[0]):
         optimizer.zero_grad()
         pred = model(images[i])/scale_factor
+        loss = criterion(pred, labels[i])
 
         if debug: 
             softmax = nn.Softmax(dim=0)
@@ -80,9 +81,21 @@ def check_real_weights(images, labels, model, direction, scale_factor=1, debug=F
             pred_list.append(probs)
             loss_list.append(loss.item())
 
-        loss = criterion(pred, labels[i])
         loss.backward()
         dL_db = model.fc1.bias.grad[direction].detach().clone()
+        z_1 = model.fc1.weight @ images[i] + model.fc1.bias
+        z_2 = model.fc2.weight @ z_1 + model.fc2.bias
+        z_2_no_label = torch.cat((z_2[:labels[i]], z_2[labels[i]+1:]), dim=0)
+        softmax_z_2_no_label = torch.cat((softmax(z_2)[:labels[i]], softmax(z_2)[labels[i]+1:]), dim=0)
+        w_2_no_label = torch.cat((model.fc2.weight[:labels[i]], model.fc2.weight[labels[i]+1:]), dim=0)
+        dL_db_manual = model.fc2.weight[labels[i], direction] * (-1 + torch.exp(z_2[labels[i]])/torch.sum(torch.exp(z_2))) \
+            + (torch.exp(z_2_no_label) / torch.sum(torch.exp(z_2)) @  w_2_no_label[:, direction])
+        dL_db_manual_with_softmax = model.fc2.weight[labels[i], direction] * (-1 + softmax(z_2)[labels[i]]) \
+            + softmax_z_2_no_label @  w_2_no_label[:, direction]
+        
+        # if debug:
+        #     if dL_db.item() != 0:
+        #         print(f"Difference between dL_db and dL_db_manual: {dL_db - dL_db_manual_with_softmax}")
         dL_dA = model.fc1.weight.grad[direction].detach().clone()
 
         dL_db_list.append(dL_db)
@@ -102,11 +115,12 @@ def check_real_weights(images, labels, model, direction, scale_factor=1, debug=F
     if debug:
         print("-------INSIDE CHECK_REAL_WEIGHTS-------")
         print(f"Weights not scaled: {weights_activated}")  
-        print(f"dL_dA from check_real_weights: {torch.sum(dL_dA_tensor, dim=0)/images.shape[0]}")   
-        print(f"dL_db from check_real_weights: {sum_dL_dB/images.shape[0]}")   
-        print(f"Checking get_observation inside check_real_weights:")
-        obs_method = get_observation(images, labels, model, criterion, optimizer, model.fc1.bias, direction, debug=False)
-        print(obs_method)
+        print(f" weifhts scaled: {weights_scaled}")
+        # print(f"dL_dA from check_real_weights: {torch.sum(dL_dA_tensor, dim=0)/images.shape[0]}")   
+        # print(f"dL_db from check_real_weights: {sum_dL_dB/images.shape[0]}")   
+        # print(f"Checking get_observation inside check_real_weights:")
+        # obs_method = get_observation(images, labels, model, criterion, optimizer, model.fc1.bias, direction, debug=False)
+        # print(obs_method)
         return  weights_scaled, weights_activated, loss_list, obs_rec
 
     return weights_scaled, obs_rec

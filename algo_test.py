@@ -486,22 +486,22 @@ def test_one_direction_attack():
 
     images, all_labels = prepare_data()
 
-    num_samples = 100
+    num_samples = 500
     sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
     images_client = images[sample]
     labels_client = all_labels[sample]
 
-    strips_obs, strips_b, neurons, bias = find_strips_parallel(images=images_client,
+    strips_obs, strips_b, neurons, bias, dL_db_history = find_strips_parallel(images=images_client,
                                                 labels=labels_client,
                                                 n_classes=10,
                                                 n_directions=1,
-                                                classification_weights_value=1,
-                                                classification_bias_value=1e-5,
-                                                control_bias=5e5,
+                                                classification_bias_value=1e6,
+                                                classification_weights_value=1e-3,
+                                                control_bias=0,
                                                 noise_norm=0,
                                                 epsilon=1e-5,
                                                 threshold=1e-6,
-                                                directions_weights_value=1,
+                                                directions_weights_value=1e-3,
                                                 device='cuda')
     
     print("First_step_ok")
@@ -511,9 +511,17 @@ def test_one_direction_attack():
     images_reconstructed = [strips_obs[0, 0]]
     print(get_ssim(images_client[0], strips_obs[0, 0]))
     restore_images([images_reconstructed[0], images_client[0]], device=args.device, display=True, title="Reconstructed image 0")
+    dL_db_list = [dL_db_history[0, 0].item()]
     for k in range(1, num_samples):
         obs = strips_obs[k, 0]
-        recon_image = (k + 1) * (obs - (sum(images_reconstructed)/ (k+1)))
+        dL_db_k = (dL_db_history[k, 0] - dL_db_history[k-1, 0]).item()
+        dL_db_list.append(dL_db_k)
+        alphas = [i/dL_db_history[k, 0].item() for i in dL_db_list]
+        print(f"Alphas for round {k}: {alphas}")
+        recon_image = (obs - sum([alphas[i] * images_reconstructed[i] for i in range(len(images_reconstructed))]))/ alphas[-1]
+        # restore_images([images_reconstructed[0], recon_image], device=args.device, display=True, title="Reconstructed image 0")
+
+        # recon_image = (k + 1) * (obs - (sum(images_reconstructed)/ (k+1)))
         images_reconstructed.append(recon_image)
     
 
@@ -553,7 +561,7 @@ def main():
     # test_step_3()
     # step_4()
     # test_step_4()
-    # test_one_direction_attack()
+    test_one_direction_attack()
     # test_layer_modification()
     # test_image_isolation(1024, n_trials=10000, var=10)
 
