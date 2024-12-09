@@ -640,6 +640,7 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
     strips_obs = torch.zeros( images.shape[0], n_directions, images.shape[1]).double().to(device)
     # TODO: swap directions for consistency
     strips_b = torch.zeros(images.shape[0], n_directions).double().to(device)
+    dL_db_history = torch.zeros(images.shape[0], n_directions).double()
     orth_subspaces = torch.zeros(n_directions, images.shape[0], images.shape[1]).double().to(device)
     alphas = {i: [] for i in range(images.shape[0])}
 
@@ -652,9 +653,11 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
 
     # bias that controls outputs distribution
     model.fc1.bias.data[n_directions:] = control_bias
+    model.fc1.weight.data[n_directions:] = torch.zeros_like(model.fc1.weight[n_directions:]).double()
+
     # classification layer modeifications to keep the output controlled by the previous bias
     if classification_weights_value is not None:
-        model.fc2.weight.data = (torch.ones_like(model.fc2.weight) * classification_weights_value).double()
+        model.fc2.weight.data = (torch.rand_like(model.fc2.weight) * classification_weights_value).double()
 
     if noise_norm is not None:
         noise = torch.randn_like(model.fc2.weight) * noise_norm
@@ -705,7 +708,7 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
                         # no image is activated, we move right
                         current_b = torch.where(non_active_mask, b_max, current_b)
                         # current_b[stop_indices[non_active_mask]] = b_max[stop_indices[non_active_mask]]
-                        observations, _ = get_observations_no_batch(images=images,
+                        observations, dL_db = get_observations_no_batch(images=images,
                                                                     labels=labels,
                                                                     model=model,
                                                                     current_b=current_b)
@@ -720,7 +723,7 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
                             flags[i], _ = check_span(orth_subspaces[i, :j], observations[i], norm_threshold=threshold, debug=False)
                     if torch.any(flags == 1):
                         current_b = torch.where(flags == 1, b_max, current_b)
-                        observations, _ = get_observations_no_batch(images=images,
+                        observations, dL_db = get_observations_no_batch(images=images,
                                                                     labels=labels,
                                                                     model=model,
                                                                     current_b=current_b)
@@ -744,6 +747,7 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
                 for i in stop_indices:
                     print(f"Found image in direction {i.item()} at position {current_b[i].item()} | Real position {b_sorted[i, j].item()}")
                     check_real_weights(images, labels, model, direction=i, debug=True)
+                    dL_db_history[j, i] = dL_db[i].detach().clone().cpu()
                     if abs(current_b[i].item() - b_sorted[i, j].item()) > epsilon[i]:
                         raise ValueError("Warning: Error in the binary search")
 
@@ -791,7 +795,7 @@ def find_strips_parallel(images, labels, n_classes, n_directions, control_bias=1
 
         print(f"Time to find the images: {time.time() - image_time}")
 
-    return strips_obs, strips_b, model.fc1.weight.data, model.fc1.bias.data
+    return strips_obs, strips_b, model.fc1.weight.data, model.fc1.bias.data, dL_db_history
 
 
 def find_corresponding_strips(strips_obs, strips_b, threshold=1e-5):
@@ -851,4 +855,65 @@ def find_corresponding_strips(strips_obs, strips_b, threshold=1e-5):
                         #     print(f"Dot product with the orthogonal component {i}: {torch.dot(residual, curr_orth[i])}")
 
     return corresponding_obs, corresponding_bias
-        
+
+
+def find_strips_one_direction(images, labels, n_classes, control_bias=1e5, n_parallel_hyperplanes=1024, directions_weights_value = 1, classification_weights_value=1e-1, classification_bias_value=0.1,
+                 noise_norm=None, epsilon=1e-8, device='cpu'):
+    """
+    Find observations in one direction, using multiple hyperplanes in a single communication round
+    images(torch.Tensor): Flattened images tensor.
+    labels(torch.Tensor): Labels tensor.
+    n_classes(int): Number of classes in the dataset.
+    n_parallel_hyperplanes(int): Number of hyperplanes to consider in parallel.
+    control_bias(float): Bias value to control the output distribution.
+    directions_weights_value(float): Scale of the weights of the direction.
+    classification_weights_value(float): Value of the classification weights.
+    classification_bias_value(float): Value of the classification bias.
+    noise_norm(float): Noise value to add to the classification weights.
+    epsilon(float): stopping threshold for the binary search.
+    device(str): Device to use."""
+
+    image_size = images.shape[1]
+    images = images.to(device)
+    labels = labels.to(device)
+
+    strips_obs = torch.zeros( images.shape[0], n_parallel_hyperplanes, images.shape[1]).double().to(device)
+    # TODO: swap directions for consistency
+    strips_b = torch.zeros(images.shape[0], n_parallel_hyperplanes).double().to(device)
+    orth_subspaces = torch.zeros(n_parallel_hyperplanes, images.shape[0], images.shape[1]).double().to(device)
+    alphas = {i: [] for i in range(images.shape[0])}
+
+    observations_history = {i: dict() for i in range(n_parallel_hyperplanes)}
+    for i in observations_history.keys():
+        observations_history[i] = {j: [] for j in range(images.shape[0])}
+    
+    model = NN(input_dim=image_size, n_classes=n_classes, hidden_dim=n_parallel_hyperplanes + 1, weight_scale=directions_weights_value)
+    model = model.double().to(device)
+
+    b_min = model.fc1.weight.data @ (torch.ones(1, image_size[1]) * -1).to(device)
+    b_max = model.fc1.weight.data @ (torch.ones(1, image_size[1])).to(device)
+    B_max = b_max.detach().clone()
+    interval = b_max - b_min
+
+    # bias that controls outputs distribution
+    model.fc1.bias.data[n_parallel_hyperplanes:] = control_bias
+    # bias for the search
+    model.fc1.bias.data[:n_parallel_hyperplanes] = torch.linspace(b_min, b_max, n_parallel_hyperplanes).to(device)
+
+    # classification layer modeifications to keep the output controlled by the previous bias
+    if classification_weights_value is not None:
+        model.fc2.weight.data = (torch.ones_like(model.fc2.weight) * classification_weights_value).double()
+
+    if noise_norm is not None:
+        noise = torch.randn_like(model.fc2.weight) * noise_norm
+        model.fc2.weight.data += noise
+    if classification_bias_value is not None:
+        model.fc2.bias.data = (torch.ones_like(model.fc2.bias) * classification_bias_value).double()
+
+    b_tensor = - torch.matmul(model.fc1.weight, torch.transpose(images, 0, 1))
+
+    # useful for checking the binary search accuracy
+    b_sorted, indices = torch.sort(torch.tensor(b_tensor.detach().clone()), dim=1)
+
+    epsilon = torch.ones_like(model.fc1.bias.data).double() * epsilon
+    
