@@ -49,7 +49,7 @@ class NN(nn.Module):
     
 
 # TODO: Extend the function to support CIFAR-100 and ImageNet datasets.
-def prepare_data():
+def prepare_data(double_precision=False):
     """
     Prepare the CIFAR-10 dataset.
     Returns:
@@ -75,9 +75,10 @@ def prepare_data():
         else:
             all_labels = torch.cat((all_labels, labels))
             images = torch.cat((images, torch.flatten(inputs, start_dim=1)))
-    
-    images = images.double()
-    labels = labels.double()
+
+    if double_precision:
+        images = images.double()
+        labels = labels.double()
 
     return images, all_labels
 

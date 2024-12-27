@@ -531,8 +531,54 @@ def test_one_direction_attack():
         print(f"SSIM for image {k}: {ssim}")
         # restore_images([paired_images[k][0], paired_images[k][1]], device=args.device, display=True, title=f"Reconstructed image {k}| SSIM: {ssim}")
 
-        
 
+def test_parallel_attack():
+    args = parse_args()
+
+    images, all_labels = prepare_data(double_precision=True)
+
+
+    num_samples = 1024
+    sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
+    images_client = images[sample]
+    labels_client = all_labels[sample]
+    strips_obs, dL_db_history = find_observations(images_client, labels_client, n_classes=10, control_bias=1e13, hidden_layers=[10], 
+                      input_weights_scale=1e-9, classification_weight_scale=1e-2, device='cuda', epsilon=1e-12, obs_atol=1e-5, obs_rtol=1e-7,
+                      norm_thresh=5)
+    
+    images_reconstructed = [strips_obs[0]]
+    print(get_ssim(images_client[0], strips_obs[0]))
+    # restore_images([images_reconstructed[0], images_client[0]], device=args.device, display=True, title="Reconstructed image 0")
+
+    dL_db_list = [dL_db_history[0]]
+
+    for k in range(1, len(dL_db_history)):
+        obs = strips_obs[k]
+        dL_db_k = dL_db_history[k] - dL_db_history[k-1]
+        dL_db_list.append(dL_db_k)
+        alphas = [i/dL_db_history[k] for i in dL_db_list]
+        # print(f"Alphas for round {k}: {alphas}")
+        recon_image = (obs - sum([alphas[i] * images_reconstructed[i] for i in range(len(images_reconstructed))]))/ alphas[-1]
+        # restore_images([images_reconstructed[0], recon_image], device=args.device, display=True, title="Reconstructed image 0")
+
+        # recon_image = (k + 1) * (obs - (sum(images_reconstructed)/ (k+1)))
+        images_reconstructed.append(recon_image)
+    
+    paired_images = couple_images(images_reconstructed, images_client)
+    count = 0
+    for k in range(len(paired_images)):
+        ssim = get_ssim(paired_images[k][0], paired_images[k][1])
+        if ssim > 0.7:
+            count += 1
+        print(f"SSIM for image {k}: {ssim}")
+    
+    restore_images([paired_images[-3][0], paired_images[-3][1]], device=args.device, display=True, title="Reconstructed image 0")
+    restore_images([paired_images[-1][0], paired_images[-1][1]], device=args.device, display=True, title="Reconstructed image 0")
+    abs_alphas = [abs(i) for i in alphas]
+    print(f"10 smallest alphas: {sorted(abs_alphas)[:10]}")
+    print(f"10 largest alphas: {sorted(abs_alphas)[-10:]}")
+    
+    print(f"Number of images with SSIM > 0.7: {count}")
 
 
 def set_seeds(seed):
@@ -561,9 +607,11 @@ def main():
     # test_step_3()
     # step_4()
     # test_step_4()
-    test_one_direction_attack()
+    # test_one_direction_attack()
     # test_layer_modification()
     # test_image_isolation(1024, n_trials=10000, var=10)
+
+    test_parallel_attack()
 
     # pred_list = check_predictions()
     # print(pred_list)

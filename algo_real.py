@@ -59,6 +59,8 @@ def main():
                                                 noise_norm=0,
                                                 epsilon=1e-5,
                                                 threshold=1e-6,
+                                                obs_atol=1e-3,
+                                                obs_rtol=1e-3,
                                                 directions_weights_value=1,
                                                 device=args.device)
                                                 
