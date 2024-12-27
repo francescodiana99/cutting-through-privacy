@@ -197,3 +197,26 @@ def couple_images(img_1_list, img_2_list):
         couples.append((img_1_list[i], img_2_list[idx]))
     return couples
 
+
+def max_norm_difference(tensor):
+    """
+    Compute the maximum norm difference between the first row and all other rows.
+    
+    Args:
+        tensor (torch.Tensor): The input tensor (2D).
+        
+    Returns:
+        max_diff (float): The maximum norm difference.
+        position (int): The index of the row with the maximum norm difference.
+    """
+    first_row = tensor[0]
+    max_diff = 0
+    position = -1
+
+    for i, row in enumerate(tensor):
+        norm_diff = torch.norm(row - first_row).item()
+        if norm_diff > max_diff:
+            max_diff = norm_diff
+            position = i
+
+    return max_diff, position
