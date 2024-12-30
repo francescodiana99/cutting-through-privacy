@@ -554,7 +554,7 @@ def test_parallel_attack():
     sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
     images_client = images[sample]
     labels_client = all_labels[sample]
-    strips_obs, dL_db_history, corr_idx = find_observations(images_client, labels_client, n_classes=10, control_bias=1e13, hidden_layers=[50], 
+    strips_obs, dL_db_history, corr_idx = find_observations(images_client, labels_client, n_classes=10, control_bias=1e13, hidden_layers=[100, 10, 50], 
                       input_weights_scale=1e-9, classification_weight_scale=1e-2, device='cuda', epsilon=1e-15, obs_atol=1e-5, obs_rtol=1e-7)
     
     images_reconstructed = [strips_obs[0]]

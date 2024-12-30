@@ -473,7 +473,8 @@ def get_observations_no_batch(images, labels, model, display=False):
             dL_db_all = dL_db_image.unsqueeze(0)
             # dL_db_manual_all = dL_db_manual_with_softmax.unsqueeze(0)
             # z_2_all = z_2.unsqueeze(0)
-            softmax_out_all = softmax_out.unsqueeze(0)
+            # preds_all = pred.unsqueeze(0)
+            # softmax_out_all = softmax_out.unsqueeze(0)
 
 
 
@@ -482,7 +483,8 @@ def get_observations_no_batch(images, labels, model, display=False):
             dL_db_all = torch.cat((dL_db_all, dL_db_image.unsqueeze(0)), 0)
             # dL_db_manual_all = torch.cat((dL_db_manual_all, dL_db_manual_with_softmax.unsqueeze(0)), 0)
             # z_2_all = torch.cat((z_2_all, z_2.unsqueeze(0)), 0)
-            softmax_out_all = torch.cat((softmax_out_all, softmax_out.unsqueeze(0)), 0)
+            # softmax_out_all = torch.cat((softmax_out_all, softmax_out.unsqueeze(0)), 0)
+            # preds_all = torch.cat((preds_all, pred.unsqueeze(0)), 0)
     
     if display:
         print(f"b: {model.layers[0].bias.data}")
@@ -1144,12 +1146,8 @@ def find_observations(images, labels, n_classes, control_bias=1e5, hidden_layers
     print("Final images found at position:")
     print(final_bias_list)
     print("Real images at position:")
-    # # TODO: remove this, only for debug
-    # model.layers[0].bias.data[:len(search_history)] = torch.tensor([i[0] for i in search_history]).double().to(device)
-    # _, sum_dL_dB, _ = get_observations_no_batch(images, labels, model, display=True)
     print(b_sorted)
 
-    #DEBUG
     model.layers[0].bias.data[0] = b_sorted[-1].item() + 0.1
     real_weights, _  = check_real_weights(images, labels, model, 0, scale_factor=1, debug=False, display_weights=False)
     print(real_weights)
