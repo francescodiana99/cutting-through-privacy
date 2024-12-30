@@ -127,14 +127,19 @@ def find_corresponding_strips_sequential(strips_dict):
     return corresponding_obs, corresponding_bias
 
 
-def restore_images(images, device='cpu', display=False, title=None):
+def restore_images(images, device='cpu', display=False, title=None, dataset_name='cifar10'):
 
     std = torch.tensor([0.5, 0.5, 0.5]).to(device)
     mean = torch.tensor([0.5, 0.5, 0.5]).to(device)
     images_scaled = []
     for image in images:
         image = image.to(device)
-        image = image.view(3, 32, 32)
+        if dataset_name in ['cifar10', 'cifar100']:
+            image = image.view(3, 32, 32)
+        elif dataset_name == 'tiny-imagenet':
+            image = image.view(3, 64, 64)
+        else:
+            raise ValueError("Dataset not supported")
         image = image.permute(1, 2, 0)
         image = image * std + mean
         images_scaled.append(image)

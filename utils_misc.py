@@ -19,6 +19,7 @@ import os
 import time
 
 from datasets.adult.adult import AdultDataset
+from datasets.tiny_imagenet.tiny_imagenet import TinyImageNetDataset
 
 
 class NN(nn.Module):
@@ -57,7 +58,7 @@ def prepare_data(double_precision=False, dataset='cifar10'):
     Returns:
         images(torch.Tensor): Flattened images in the CIFAR-10 dataset.
         all_labels(torch.Tensor): Labels of the images in the CIFAR-10 dataset.
-        dataset(str): Name of the dataset. Default is 'cifar10'. Possible values are 'cifar10', 'cifar100' and 'adult'.
+        dataset(str): Name of the dataset. Default is 'cifar10'. Possible values are 'cifar10', 'cifar100', 'tiny-imagenet' and 'adult'.
     """
 
 
@@ -67,15 +68,17 @@ def prepare_data(double_precision=False, dataset='cifar10'):
 
     batch_size = 1024
 
-    if dataset not in ['cifar10', 'cifar100', 'adult']:
+    if dataset not in ['cifar10', 'cifar100', 'adult', 'tiny-imagenet']:
         raise NotImplementedError("Dataset not supported.")
     
     if dataset == 'cifar10':
         trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
                                                 download=True, transform=transform)
+        n_classes = 10
     elif dataset == 'cifar100':
         trainset = torchvision.datasets.CIFAR100(root='./data', train=True,
                                                 download=True, transform=transform)
+        n_classes = 100
     elif dataset == 'adult':
         if os.path.exists('./data/adult'):
             adult_set = AdultDataset(cache_dir='./data/adult', download=False, mode='train', seed=42)
@@ -88,7 +91,14 @@ def prepare_data(double_precision=False, dataset='cifar10'):
         else:
             features_tensor = torch.tensor(adult_set.features, dtype=torch.float)
             labels_tensor = torch.tensor(adult_set.labels, dtype=torch.int)
+        n_classes = 1
         return features_tensor, labels_tensor
+    
+    elif dataset == 'tiny-imagenet':
+        dataset = TinyImageNetDataset(root='./data/tiny-imagenet-200', transform=transform)
+        trainset = dataset.get_train_dataset()
+        n_classes = 200
+
         
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
                                             shuffle=True, num_workers=2)
@@ -106,7 +116,7 @@ def prepare_data(double_precision=False, dataset='cifar10'):
         images = images.double()
         labels = labels.double()
 
-    return images, all_labels
+    return images, all_labels, n_classes
 
 
 def set_seeds(seed):

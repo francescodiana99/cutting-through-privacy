@@ -546,15 +546,15 @@ def couple_data(reconstructed_data, real_data):
 
 def test_parallel_attack():
     args = parse_args()
-    dataset_name = 'cifar10'
-    images, all_labels = prepare_data(double_precision=True, dataset=dataset_name)
+    dataset_name = 'cifar100'
+    images, all_labels, n_classes = prepare_data(double_precision=True, dataset=dataset_name)
 
 
-    num_samples = 1200
+    num_samples = 100
     sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
     images_client = images[sample]
     labels_client = all_labels[sample]
-    strips_obs, dL_db_history, corr_idx = find_observations(images_client, labels_client, n_classes=10, control_bias=1e13, hidden_layers=[100, 10, 50], 
+    strips_obs, dL_db_history, corr_idx = find_observations(images_client, labels_client, n_classes=n_classes, control_bias=1e13, hidden_layers=[100], 
                       input_weights_scale=1e-9, classification_weight_scale=1e-2, device='cuda', epsilon=1e-15, obs_atol=1e-5, obs_rtol=1e-7)
     
     images_reconstructed = [strips_obs[0]]
@@ -579,10 +579,12 @@ def test_parallel_attack():
         paired_images = [(images_reconstructed[i], images_client[corr_idx[i]]) for i in range(len(images_reconstructed))]
         count = 0
         for k in range(len(paired_images)):
-            ssim = get_ssim(paired_images[k][0], paired_images[k][1])
+            ssim = get_ssim(paired_images[k][0], paired_images[k][1], dataset_name=dataset_name)
             if ssim > 0.7:
                 count += 1
             print(f"SSIM for image {k}: {ssim}")
+        
+        restore_images([paired_images[-1][0], paired_images[-1][1]], device=args.device, display=True, title="Last Reconstructed image", dataset_name=dataset_name)
         
         
     else:

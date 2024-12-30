@@ -172,11 +172,15 @@ def get_image_gradients(images, labels, model, criterion, optimizer, b, directio
     return da_dL_list, db_dL_list, db_dL_large_list
 
 
-def get_ssim(img_1, img_2):
+def get_ssim(img_1, img_2, dataset_name):
     """
     Restore the original shape of img_1 and img_2 and compute the SSIM between them."""
-
-    H, W, C = 32, 32, 3
+    if dataset_name in ['cifar10', 'cifar100']:
+        H, W, C = 32, 32, 3
+    elif dataset_name == 'tiny-imagenet':
+        H, W, C = 64, 64, 3
+    else:
+        raise NotImplementedError("Dataset not supported.")
 
     img_1 = img_1.cpu().reshape(H, W, C).numpy()
     img_2 = img_2.cpu().reshape(H, W, C).numpy()
