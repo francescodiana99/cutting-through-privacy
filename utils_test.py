@@ -82,21 +82,21 @@ def check_real_weights(images, labels, model, direction, scale_factor=1, debug=F
             loss_list.append(loss.item())
 
         loss.backward()
-        dL_db = model.fc1.bias.grad[direction].detach().clone()
-        z_1 = model.fc1.weight @ images[i] + model.fc1.bias
-        z_2 = model.fc2.weight @ z_1 + model.fc2.bias
-        z_2_no_label = torch.cat((z_2[:labels[i]], z_2[labels[i]+1:]), dim=0)
-        softmax_z_2_no_label = torch.cat((softmax(z_2)[:labels[i]], softmax(z_2)[labels[i]+1:]), dim=0)
-        w_2_no_label = torch.cat((model.fc2.weight[:labels[i]], model.fc2.weight[labels[i]+1:]), dim=0)
-        dL_db_manual = model.fc2.weight[labels[i], direction] * (-1 + torch.exp(z_2[labels[i]])/torch.sum(torch.exp(z_2))) \
-            + (torch.exp(z_2_no_label) / torch.sum(torch.exp(z_2)) @  w_2_no_label[:, direction])
-        dL_db_manual_with_softmax = model.fc2.weight[labels[i], direction] * (-1 + softmax(z_2)[labels[i]]) \
-            + softmax_z_2_no_label @  w_2_no_label[:, direction]
+        dL_db = model.layers[0].bias.grad[direction].detach().clone()
+        # z_1 = model.fc1.weight @ images[i] + model.fc1.bias
+        # z_2 = model.fc2.weight @ z_1 + model.fc2.bias
+        # z_2_no_label = torch.cat((z_2[:labels[i]], z_2[labels[i]+1:]), dim=0)
+        # softmax_z_2_no_label = torch.cat((softmax(z_2)[:labels[i]], softmax(z_2)[labels[i]+1:]), dim=0)
+        # w_2_no_label = torch.cat((model.fc2.weight[:labels[i]], model.fc2.weight[labels[i]+1:]), dim=0)
+        # dL_db_manual = model.fc2.weight[labels[i], direction] * (-1 + torch.exp(z_2[labels[i]])/torch.sum(torch.exp(z_2))) \
+        #     + (torch.exp(z_2_no_label) / torch.sum(torch.exp(z_2)) @  w_2_no_label[:, direction])
+        # dL_db_manual_with_softmax = model.fc2.weight[labels[i], direction] * (-1 + softmax(z_2)[labels[i]]) \
+        #     + softmax_z_2_no_label @  w_2_no_label[:, direction]
         
         # if debug:
         #     if dL_db.item() != 0:
         #         print(f"Difference between dL_db and dL_db_manual: {dL_db - dL_db_manual_with_softmax}")
-        dL_dA = model.fc1.weight.grad[direction].detach().clone()
+        dL_dA = model.layers[0].weight.grad[direction].detach().clone()
 
         dL_db_list.append(dL_db)
         dL_dA_list.append(dL_dA)

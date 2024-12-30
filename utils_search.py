@@ -453,34 +453,36 @@ def get_observations_no_batch(images, labels, model, display=False):
         dL_dA_image = model.layers[0].weight.grad.data.detach().clone()
 
         softmax = nn.Softmax(dim=0)
+        softmax_out = softmax(pred)
 
-        z_1 = model.layers[0].weight @ images[i] + model.layers[0].bias
-        z_2 = model.layers[2].weight @ z_1 + model.layers[2].bias
-        # print(f"z_1: {z_1}")
-        # print(f"z_2: {z_2}")
-        # print(softmax(z_2))
-        z_2_no_label = torch.cat((z_2[:labels[i]], z_2[labels[i]+1:]), dim=0)
-        softmax_z_2_no_label = torch.cat((softmax(z_2)[:labels[i]], softmax(z_2)[labels[i]+1:]), dim=0)
-        w_2_no_label = torch.cat((model.layers[-1].weight[:labels[i]], model.layers[-1].weight[labels[i]+1:]), dim=0)
+        # z_1 = (model.layers[0].weight @ images[i] + model.layers[0].bias)
+        # z_2 = (model.layers[2].weight @ z_1 + model.layers[2].bias)
+        # # print(f"z_1: {z_1}")
+        # # print(f"z_2: {z_2}")
+        # # print(softmax(z_2))
+        # softmax_z_2_no_label = torch.cat((softmax(z_2)[:labels[i]], softmax(z_2)[labels[i]+1:]), dim=0)
+        # w_2_no_label = torch.cat((model.layers[-1].weight[:labels[i]], model.layers[-1].weight[labels[i]+1:]), dim=0)
 
-        dL_db_manual_with_softmax = model.layers[-1].weight[labels[i]] * (-1 + softmax(z_2)[labels[i]]) \
-            + softmax_z_2_no_label @  w_2_no_label[:]
+        # dL_db_manual_with_softmax = (model.layers[-1].weight[labels[i]] * (-1 + softmax(z_2)[labels[i]]) \
+        #     + softmax_z_2_no_label @  w_2_no_label[:]).cpu()
 
         
 
         if i == 0:
             dL_dA_all = dL_dA_image.unsqueeze(0)
             dL_db_all = dL_db_image.unsqueeze(0)
-            dL_db_manual_all = dL_db_manual_with_softmax.unsqueeze(0)
-            z_2_all = z_2.unsqueeze(0)
+            # dL_db_manual_all = dL_db_manual_with_softmax.unsqueeze(0)
+            # z_2_all = z_2.unsqueeze(0)
+            softmax_out_all = softmax_out.unsqueeze(0)
 
 
 
         else:
             dL_dA_all = torch.cat((dL_dA_all, dL_dA_image.unsqueeze(0)), 0)
             dL_db_all = torch.cat((dL_db_all, dL_db_image.unsqueeze(0)), 0)
-            dL_db_manual_all = torch.cat((dL_db_manual_all, dL_db_manual_with_softmax.unsqueeze(0)), 0)
-            z_2_all = torch.cat((z_2_all, z_2.unsqueeze(0)), 0)
+            # dL_db_manual_all = torch.cat((dL_db_manual_all, dL_db_manual_with_softmax.unsqueeze(0)), 0)
+            # z_2_all = torch.cat((z_2_all, z_2.unsqueeze(0)), 0)
+            softmax_out_all = torch.cat((softmax_out_all, softmax_out.unsqueeze(0)), 0)
     
     if display:
         print(f"b: {model.layers[0].bias.data}")
@@ -494,7 +496,7 @@ def get_observations_no_batch(images, labels, model, display=False):
     
     
 
-    return obs_rec, sum_dL_dB, torch.sum(dL_dA_all, dim=0)
+    return obs_rec.cpu(), sum_dL_dB.cpu(), torch.sum(dL_dA_all, dim=0).cpu()
 
 def check_search_direction(observation_history, max_norm, min_norm):
     
@@ -977,66 +979,6 @@ def set_search_bias(model, intervals, n_hyperplanes, round, device='cpu'):
     model = model.to(device)
     return model
 
-
-# def update_intervals(search_history, obs_atol=1e-3, obs_rtol=1e-3, epsilon=1e-5, norm_threshold=5):
-#     new_intervals = []
-#     search_history = sorted(search_history, key=lambda x: x[0])
-#     new_history = [] 
-#     i = 0
-
-#     # handle first hplane (might be nan if no images on the right)
-#     while torch.isnan(search_history[i][1]).any():
-#         i = i + 1
-#     new_history.append(search_history[i - 1])
-#     new_history.append(search_history[i])
-#     i = i + 1
-
-#     while i < len(search_history) - 1:
-#         # I need the second if condition to keep track of intervals later
-#         if ((not torch.allclose(search_history[i][1],search_history[i-1][1], atol=obs_atol, rtol=obs_rtol) and torch.norm(search_history[i][1] - search_history[i-1][1]) > 1) )or \
-#         ((not torch.allclose(search_history[i][1], search_history[i+1][1], atol=obs_atol, rtol=obs_rtol)) and torch.norm(search_history[i][1] - search_history[i+1][1]) > 1):
-#             new_history.append(search_history[i])
-#         i = i + 1
-    
-#     # handle last hplane (might be dropped if equal to the previous one)
-#     if not torch.allclose(search_history[-1][1], search_history[-2][1], atol=obs_atol, rtol=obs_rtol) and torch.norm(search_history[-1][1] - search_history[-2][1]) > norm_threshold:
-#         new_history.append(search_history[-2])
-#         new_history.append(search_history[-1])
-    
-#     # b_debug_old = [i[0].item() for i in search_history]
-#     # b_debug_new = [i[0].item() for i in new_history]
-
-#     # update the intervals
-#     # first interval made by the first two hyperplanes
-#     new_intervals.append((new_history[0][0].detach().clone(), new_history[1][0].detach().clone()))
-#     int_start = new_history[2][0].detach().clone()
-#     i = 3
-#     while i < len(new_history) - 1: 
-#         if (not torch.allclose(new_history[i][1], new_history[i-1][1], atol=obs_atol, rtol=obs_rtol)) and \
-#             torch.norm(new_history[i][1] - new_history[i-1][1]) > norm_threshold:
-
-#             assert int_start is not None, "Interval was not opened"
-#             int_end = new_history[i][0].detach().clone()
-#             new_intervals.append((int_start, int_end))
-#             int_start = None
-        
-#         if (not torch.allclose(new_history[i][1], new_history[i+1][1], atol=obs_atol, rtol=obs_rtol)) and \
-#             torch.norm(new_history[i][1] - new_history[i+1][1]) > norm_threshold:
-#             int_start = new_history[i][0].detach().clone()
-        
-#         i = i + 1
-#     int_end = new_history[-1][0]
-#     new_intervals.append((int_start, int_end))
-
-#     # remove intervals with a spacing smaller than epsilon
-#     if len(new_intervals) > 1:
-#         clean_intervals = [i for i in new_intervals if i[1] - i[0] > epsilon]
-#     else:
-#         clean_intervals = new_intervals
-#     # print(f"new positions: {b_debug_new}")
-
-#     return clean_intervals, new_history
-
 def update_intervals(obs_history, atol=1e-3, rtol=1e-3, epsilon=1e-5, norm_thresh=5):
     """
     Update the search intervals based on the observations.
@@ -1124,9 +1066,11 @@ def clean_observations(search_history, atol=1e-3, rtol=1e-3):
     b_list = []
 
     # remove the first observation (corresponding to nan) and add the following one to the list 
-    search_history.pop(0)
+    if torch.isnan(search_history[0][1]).any():
+        search_history.pop(0)
     final_observations_list = [search_history[0][1]]
     final_dL_dB_list = [search_history[0][2]]
+    b_list.append(search_history[0][0].float().item())
     for i in range(1, len(search_history)):
         if not torch.allclose(search_history[i][1], search_history[i-1][1], atol=atol, rtol=rtol):
             final_observations_list.append(search_history[i][1])
@@ -1139,7 +1083,7 @@ def clean_observations(search_history, atol=1e-3, rtol=1e-3):
         
 
 def find_observations(images, labels, n_classes, control_bias=1e5, hidden_layers=[1024],  classification_weight_scale=1e-3, 
-                     input_weights_scale=1 , device='cpu', epsilon=1e-5, obs_atol=1e-5, obs_rtol=1e-7, norm_thresh=5):
+                     input_weights_scale=1 , device='cpu', epsilon=1e-5, obs_atol=1e-5, obs_rtol=1e-7):
 
 
     image_size = images.shape[1]
@@ -1154,16 +1098,17 @@ def find_observations(images, labels, n_classes, control_bias=1e5, hidden_layers
                   classification_bias=control_bias)
     model = model.double().to(device)
 
-    b_tensor = - torch.matmul(model.layers[0].weight[0], torch.transpose(images, 0, 1))
-    b_sorted, indices = torch.sort(torch.tensor(b_tensor.detach().clone()), dim=0)
+    b_tensor = - torch.matmul(model.layers[0].weight[0], torch.transpose(images, 0, 1)).cpu().detach()
+    b_sorted, indices = torch.sort(torch.tensor(b_tensor.clone()), dim=0)
+    sorted_indices = torch.argsort(b_tensor, dim=0)
+    print(f"Min spacing between consecutive images: {torch.min(b_sorted[1:] - b_sorted[:-1])}")
 
-    b_1 = - torch.matmul(abs(model.layers[0].weight[0]), torch.ones(images.shape[1]).double().to(device))
-    b_2 = - torch.matmul(abs(model.layers[0].weight[0]), (torch.ones(images.shape[1]).double() * -1).to(device))
+    b_1 = - torch.matmul(abs(model.layers[0].weight[0]).cpu(), torch.ones(images.shape[1]).double()).detach()
+    b_2 = - torch.matmul(abs(model.layers[0].weight[0]).cpu(), (torch.ones(images.shape[1]).double() * -1)).detach()
     b_min = torch.min(b_1, b_2)
     b_max = torch.max(b_1, b_2)
     search_history = []
     # only for debug
-    dL_dA_list = []
 
     intervals = [(b_min, b_max)] 
     spacing = (b_max - b_min)/ hidden_layers[0]
@@ -1175,13 +1120,9 @@ def find_observations(images, labels, n_classes, control_bias=1e5, hidden_layers
                                          round=r, device=device)
         # get the observations
         # print(f"Current bias: {model.layers[0].bias.data}")
-        observations, sum_dL_dB, sum_dL_dA = get_observations_no_batch(images, labels, model, display=False)
-        dL_dA_list.append(sum_dL_dA)
+        observations, sum_dL_dB, _ = get_observations_no_batch(images, labels, model, display=False)
         bias_list = model.layers[0].bias.data.cpu()
-        search_history.extend((bias_list[i].detach().clone(), observations[i].detach().clone().cpu(), sum_dL_dB[i].cpu().item()) for i in range(hidden_layers[0]))
-        # print(bias_history)
-        # print(intervals)
-        # print(f"Real image position: {b_sorted}")
+        search_history.extend((bias_list[i].detach().clone().cpu(), observations[i].detach().clone().cpu(), sum_dL_dB[i].cpu().item()) for i in range(hidden_layers[0]))
 
         # update the intervals
         intervals, search_history = update_intervals(search_history, atol=obs_atol, rtol=obs_rtol, epsilon=epsilon)
@@ -1208,6 +1149,10 @@ def find_observations(images, labels, n_classes, control_bias=1e5, hidden_layers
     # _, sum_dL_dB, _ = get_observations_no_batch(images, labels, model, display=True)
     print(b_sorted)
 
-    return final_obs, final_dL_dB 
+    #DEBUG
+    model.layers[0].bias.data[0] = b_sorted[-1].item() + 0.1
+    real_weights, _  = check_real_weights(images, labels, model, 0, scale_factor=1, debug=False, display_weights=False)
+    print(real_weights)
+    return final_obs, final_dL_dB, sorted_indices
     
 
