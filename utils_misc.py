@@ -18,6 +18,8 @@ import argparse
 import os
 import time
 
+from datasets.adult.adult import AdultDataset
+
 
 class NN(nn.Module):
     """
@@ -49,21 +51,45 @@ class NN(nn.Module):
     
 
 # TODO: Extend the function to support CIFAR-100 and ImageNet datasets.
-def prepare_data(double_precision=False):
+def prepare_data(double_precision=False, dataset='cifar10'):
     """
-    Prepare the CIFAR-10 dataset.
+    Prepare dataset.
     Returns:
         images(torch.Tensor): Flattened images in the CIFAR-10 dataset.
         all_labels(torch.Tensor): Labels of the images in the CIFAR-10 dataset.
+        dataset(str): Name of the dataset. Default is 'cifar10'. Possible values are 'cifar10', 'cifar100' and 'adult'.
     """
+
+
     transform = transforms.Compose(
         [transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
     batch_size = 1024
 
-    trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
-                                            download=True, transform=transform)
+    if dataset not in ['cifar10', 'cifar100', 'adult']:
+        raise NotImplementedError("Dataset not supported.")
+    
+    if dataset == 'cifar10':
+        trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+                                                download=True, transform=transform)
+    elif dataset == 'cifar100':
+        trainset = torchvision.datasets.CIFAR100(root='./data', train=True,
+                                                download=True, transform=transform)
+    elif dataset == 'adult':
+        if os.path.exists('./data/adult'):
+            adult_set = AdultDataset(cache_dir='./data/adult', download=False, mode='train', seed=42)
+        else:
+            adult_set = AdultDataset(cache_dir='./data/adult', download=True, mode='train', seed=42)
+        
+        if double_precision:
+            features_tensor = torch.tensor(adult_set.features, dtype=torch.double)
+            labels_tensor = torch.tensor(adult_set.targets, dtype=torch.long)
+        else:
+            features_tensor = torch.tensor(adult_set.features, dtype=torch.float)
+            labels_tensor = torch.tensor(adult_set.labels, dtype=torch.int)
+        return features_tensor, labels_tensor
+        
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
                                             shuffle=True, num_workers=2)
     
@@ -124,5 +150,25 @@ def parse_args():
                         action='store_true',
                         help="Display the images.",
                         default=False)
+    
+    parser.add_argument("--dataset",
+                        type=str,
+                        default='cifar10',
+                        help="Dataset to use for the experiment. Possible values are 'cifar10', 'tiny-imagenet' and 'adult'.")
+    
+    parser.add_argument("--hidden_layers",
+                        nargs='+' ,
+                        help="Hidden layers structure of the neural network.")
+    
+    parser.add_argument("--class_bias", 
+                        type=float,
+                        default=1e12,
+                        help="Classification bias value")
+    
+    parser.add_argument("--weight_scale",
+                        type=float,
+                        default=1,
+                        help="Scale factor for the weight initialization.")
+    
     
     return parser.parse_args()

@@ -524,30 +524,40 @@ def test_one_direction_attack():
         # recon_image = (k + 1) * (obs - (sum(images_reconstructed)/ (k+1)))
         images_reconstructed.append(recon_image)
     
-
     paired_images = couple_images(images_reconstructed, images_client)
     for k in range(num_samples):
         ssim = get_ssim(paired_images[k][0], paired_images[k][1])
         print(f"SSIM for image {k}: {ssim}")
         # restore_images([paired_images[k][0], paired_images[k][1]], device=args.device, display=True, title=f"Reconstructed image {k}| SSIM: {ssim}")
 
+def couple_data(reconstructed_data, real_data):
+    """Pair each tensor with the one with the minimum norm difference"""
+    paired_data = []
+    for i in range(len(reconstructed_data)):
+        min_norm = 1e10
+        for j in range(len(real_data)):
+            norm = torch.norm(reconstructed_data[i] - real_data[j])
+            if norm < min_norm:
+                min_norm = norm
+                min_idx = j
+        paired_data.append((reconstructed_data[i], real_data[min_idx], min_norm))
+    return paired_data
+
 
 def test_parallel_attack():
     args = parse_args()
+    dataset_name = 'cifar10'
+    images, all_labels = prepare_data(double_precision=True, dataset=dataset_name)
 
-    images, all_labels = prepare_data(double_precision=True)
 
-
-    num_samples = 1024
+    num_samples = 1200
     sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
     images_client = images[sample]
     labels_client = all_labels[sample]
-    strips_obs, dL_db_history = find_observations(images_client, labels_client, n_classes=10, control_bias=1e13, hidden_layers=[10], 
-                      input_weights_scale=1e-9, classification_weight_scale=1e-2, device='cuda', epsilon=1e-12, obs_atol=1e-5, obs_rtol=1e-7,
-                      norm_thresh=5)
+    strips_obs, dL_db_history, corr_idx = find_observations(images_client, labels_client, n_classes=10, control_bias=1e13, hidden_layers=[50], 
+                      input_weights_scale=1e-9, classification_weight_scale=1e-2, device='cuda', epsilon=1e-15, obs_atol=1e-5, obs_rtol=1e-7)
     
     images_reconstructed = [strips_obs[0]]
-    print(get_ssim(images_client[0], strips_obs[0]))
     # restore_images([images_reconstructed[0], images_client[0]], device=args.device, display=True, title="Reconstructed image 0")
 
     dL_db_list = [dL_db_history[0]]
@@ -563,23 +573,36 @@ def test_parallel_attack():
 
         # recon_image = (k + 1) * (obs - (sum(images_reconstructed)/ (k+1)))
         images_reconstructed.append(recon_image)
-    
-    paired_images = couple_images(images_reconstructed, images_client)
-    count = 0
-    for k in range(len(paired_images)):
-        ssim = get_ssim(paired_images[k][0], paired_images[k][1])
-        if ssim > 0.7:
-            count += 1
-        print(f"SSIM for image {k}: {ssim}")
-    
-    restore_images([paired_images[-3][0], paired_images[-3][1]], device=args.device, display=True, title="Reconstructed image 0")
-    restore_images([paired_images[-1][0], paired_images[-1][1]], device=args.device, display=True, title="Reconstructed image 0")
+
+    if dataset_name != 'adult':
+        # paired_images = couple_images(images_reconstructed, images_client)
+        paired_images = [(images_reconstructed[i], images_client[corr_idx[i]]) for i in range(len(images_reconstructed))]
+        count = 0
+        for k in range(len(paired_images)):
+            ssim = get_ssim(paired_images[k][0], paired_images[k][1])
+            if ssim > 0.7:
+                count += 1
+            print(f"SSIM for image {k}: {ssim}")
+        
+        
+    else:
+        paired_samples = couple_data(images_reconstructed, images_client)
+        avg_norm_diff = sum([i[2] for i in paired_samples])/len(paired_samples)
+        max_norm_diff = max([i[2] for i in paired_samples])
+        min_norm_diff = min([i[2] for i in paired_samples])
+
+        print(f"Average norm difference: {avg_norm_diff}")
+        print(f"Max norm difference: {max_norm_diff}")
+        print(f"Min norm difference: {min_norm_diff}")
+
     abs_alphas = [abs(i) for i in alphas]
+    print(alphas)
     print(f"10 smallest alphas: {sorted(abs_alphas)[:10]}")
     print(f"10 largest alphas: {sorted(abs_alphas)[-10:]}")
+
+    print(sum(alphas))
     
     print(f"Number of images with SSIM > 0.7: {count}")
-
 
 def set_seeds(seed):
     """
