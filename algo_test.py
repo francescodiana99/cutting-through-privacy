@@ -9,7 +9,7 @@ import numpy as np
 from utils_search import *
 from utils_misc import *
 from utils_test import *
-
+from attacks.utils import prepare_resnet
 
 def projection(x, y):
     """
@@ -545,18 +545,19 @@ def couple_data(reconstructed_data, real_data):
 
 
 def test_parallel_attack():
-    args = parse_args()
-    dataset_name = 'cifar100'
-    images, all_labels, n_classes = prepare_data(double_precision=True, dataset=dataset_name)
+    # args = parse_args()
+    dataset_name = 'cifar10'
+    num_samples = 10
+    images, all_labels, n_classes = prepare_data(double_precision=True, dataset=dataset_name,n_samples=num_samples, model_type='fc')
 
 
-    num_samples = 100
     sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
     images_client = images[sample]
     labels_client = all_labels[sample]
     strips_obs, dL_db_history, corr_idx = find_observations(images_client, labels_client, n_classes=n_classes, control_bias=1e13, hidden_layers=[100], 
-                      input_weights_scale=1e-9, classification_weight_scale=1e-2, device='cuda', epsilon=1e-15, obs_atol=1e-5, obs_rtol=1e-7)
-    
+                      input_weights_scale=1e-9, classification_weight_scale=1e-3, device='cuda', epsilon=1e-12, obs_atol=1e-5, obs_rtol=1e-6)
+    # strips_obs, dL_db_history, corr_idx = find_observations_cnn(images_client, labels_client, n_classes=n_classes, dataset_name=dataset_name, control_bias=1e12, n_neurons=100, 
+    #                   weights_scale=1e-5, classification_weight_scale=1e-3, device='cuda', epsilon=1e-6, obs_atol=1e-5, obs_rtol=1e-6)
     images_reconstructed = [strips_obs[0]]
     # restore_images([images_reconstructed[0], images_client[0]], device=args.device, display=True, title="Reconstructed image 0")
 
@@ -575,17 +576,18 @@ def test_parallel_attack():
         images_reconstructed.append(recon_image)
 
     if dataset_name != 'adult':
+        images_client = images_client.flatten(start_dim=1)
         # paired_images = couple_images(images_reconstructed, images_client)
         paired_images = [(images_reconstructed[i], images_client[corr_idx[i]]) for i in range(len(images_reconstructed))]
         count = 0
         for k in range(len(paired_images)):
             ssim = get_ssim(paired_images[k][0], paired_images[k][1], dataset_name=dataset_name)
-            if ssim > 0.7:
+            if ssim > 0.9:
                 count += 1
             print(f"SSIM for image {k}: {ssim}")
         
-        restore_images([paired_images[-1][0], paired_images[-1][1]], device=args.device, display=True, title="Last Reconstructed image", dataset_name=dataset_name)
-        
+        restore_images([paired_images[-1][0], paired_images[-1][1]], device='cuda', display=True, title="Last Reconstructed image", dataset_name=dataset_name)
+        print(f"Number of images with SSIM > 0.9: {count}")
         
     else:
         paired_samples = couple_data(images_reconstructed, images_client)
@@ -604,7 +606,6 @@ def test_parallel_attack():
 
     print(sum(alphas))
     
-    print(f"Number of images with SSIM > 0.7: {count}")
 
 def set_seeds(seed):
     """
@@ -621,6 +622,11 @@ def set_seeds(seed):
     np.random.seed(seed)
     random.seed(seed)    
 
+def test_resnet_forward():
+    model = prepare_resnet('resnet18', 'imagenet', 1000, 1e-3, 1e12, 1e-3, 1e12)
+    x = torch.randn(2, 3, 224, 224)
+    y = model(x)
+    print(y)
 def main():
 
     set_seeds(42)
@@ -637,7 +643,7 @@ def main():
     # test_image_isolation(1024, n_trials=10000, var=10)
 
     test_parallel_attack()
-
+    # test_resnet_forward()
     # pred_list = check_predictions()
     # print(pred_list)
 
