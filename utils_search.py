@@ -7,7 +7,6 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import copy
 
 import matplotlib.pyplot as plt
 
@@ -22,6 +21,7 @@ from utils_misc import *
 from utils_test import *
 
 from models.fc_net import FCNet
+from attacks.utils import prepare_resnet
 
 
 def projection(x, y):
@@ -128,9 +128,12 @@ def find_corresponding_strips_sequential(strips_dict):
 
 
 def restore_images(images, device='cpu', display=False, title=None, dataset_name='cifar10'):
-
-    std = torch.tensor([0.5, 0.5, 0.5]).to(device)
-    mean = torch.tensor([0.5, 0.5, 0.5]).to(device)
+    if dataset_name != 'imagenet':
+        std = torch.tensor([0.5, 0.5, 0.5]).to(device)
+        mean = torch.tensor([0.5, 0.5, 0.5]).to(device)
+    else:
+        std = torch.tensor([0.229, 0.224, 0.225]).to(device)
+        mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
     images_scaled = []
     for image in images:
         image = image.to(device)
@@ -138,6 +141,8 @@ def restore_images(images, device='cpu', display=False, title=None, dataset_name
             image = image.view(3, 32, 32)
         elif dataset_name == 'tiny-imagenet':
             image = image.view(3, 64, 64)
+        elif dataset_name == 'imagenet':
+            image = image.view(3, 224, 224)
         else:
             raise ValueError("Dataset not supported")
         image = image.permute(1, 2, 0)
@@ -396,6 +401,8 @@ def get_observatation_no_batch(images, labels, model, direction, b):
 
         dL_db_list.append(dL_db)
         dL_dA_list.append(dL_dA)
+        if i == 4: 
+            print(model.layers[0].output_grad)
 
     sum_dL_dB = sum(dL_db_list)
     dL_dA_tensor = torch.stack(dL_dA_list)
@@ -439,7 +446,7 @@ def get_observations_no_batch_old(images, labels, model, current_b, display=Fals
     return obs_rec, sum_dL_dB
 
 
-def get_observations_no_batch(images, labels, model, display=False):
+def get_observations_no_batch_cnn(images, labels, model, display=False):
     """
     Get the observation by computing sequentially per per-sample gradients.
     """
@@ -447,18 +454,81 @@ def get_observations_no_batch(images, labels, model, display=False):
     optimizer = torch.optim.SGD(model.parameters())
     criterion = nn.CrossEntropyLoss()
     model.train()
+    inputs = {}
+
+    # labels = labels.double()
+
+    for i in range(images.shape[0]):
+        if i == 4:
+            h = model.fc.register_forward_hook(get_class_inputs(inputs, i))
+        optimizer.zero_grad()
+        pred = model(images[i][None, ...])
+
+        # pred = pred.squeeze()
+        loss = criterion(pred.squeeze(), labels[i])
+        loss.backward()
+        dL_db_image = model.conv1[0].linear.bias.grad.data.detach().clone()
+        dL_dA_image = model.conv1[0].linear.weight.grad.data.detach().clone()
+
+        if i == 4: 
+            print(model.conv1[0].output_grad)
+            print(inputs[4])
+            softmax = nn.Softmax(dim=1)
+            print(f"min pred: {torch.min(softmax(pred)).item()}")
+            print(f"max pred: {torch.max(softmax(pred)).item()}")
+        if i == 0:
+            # dL_dA_all = dL_dA_image.unsqueeze(0)
+            dL_db_all = dL_db_image.unsqueeze(0)
+            sum_dL_dA = dL_dA_image
+            sum_dL_dB = dL_db_image
+            # dL_db_manual_all = dL_db_manual_with_softmax.unsqueeze(0)
+            # z_2_all = z_2.unsqueeze(0)
+            preds_all = pred.unsqueeze(0)
+            # softmax_out_all = softmax_out.unsqueeze(0)
+            
+        else:
+            dL_db_all = torch.cat((dL_db_all, dL_db_image.unsqueeze(0)), 0)
+            sum_dL_dA += dL_dA_image
+            sum_dL_dB += dL_db_image
+
+            preds_all = torch.cat((preds_all, pred.unsqueeze(0)), 0)
+        if i == 4:
+            h.remove()
+    
+    if display:
+        print(f"b: {model.conv1[0].linear.bias.data}")
+
+    obs_rec = sum_dL_dA / sum_dL_dB.view(-1, 1)
+
+    return obs_rec.cpu(), sum_dL_dB.cpu(), sum_dL_dA.cpu()
+
+
+def get_observations_no_batch(images, labels, model, display=False):
+    """
+    Get the observation by computing sequentially per per-sample gradients.
+    """
+
+    optimizer = torch.optim.SGD(model.parameters())
+    criterion = nn.CrossEntropyLoss()
+    # criterion = nn.BCEWithLogitsLoss()
+    model.train()
+    
+    # labels = labels.double()
 
     for i in range(images.shape[0]):
         optimizer.zero_grad()
         pred = model(images[i])
 
+        # pred = pred.squeeze()
         loss = criterion(pred, labels[i])
         loss.backward()
         dL_db_image = model.layers[0].bias.grad.data.detach().clone()
         dL_dA_image = model.layers[0].weight.grad.data.detach().clone()
 
-        softmax = nn.Softmax(dim=0)
-        softmax_out = softmax(pred)
+        if i == 4:
+            print(dL_db_image)
+        # softmax = nn.Softmax(dim=0)
+        # softmax_out = softmax(pred)
 
         # z_1 = (model.layers[0].weight @ images[i] + model.layers[0].bias)
         # z_2 = (model.layers[2].weight @ z_1 + model.layers[2].bias)
@@ -474,36 +544,38 @@ def get_observations_no_batch(images, labels, model, display=False):
         
 
         if i == 0:
-            dL_dA_all = dL_dA_image.unsqueeze(0)
+            # dL_dA_all = dL_dA_image.unsqueeze(0)
             dL_db_all = dL_db_image.unsqueeze(0)
+            sum_dL_dA = dL_dA_image
+            sum_dL_dB = dL_db_image
             # dL_db_manual_all = dL_db_manual_with_softmax.unsqueeze(0)
             # z_2_all = z_2.unsqueeze(0)
-            # preds_all = pred.unsqueeze(0)
+            preds_all = pred.unsqueeze(0)
             # softmax_out_all = softmax_out.unsqueeze(0)
 
 
 
         else:
-            dL_dA_all = torch.cat((dL_dA_all, dL_dA_image.unsqueeze(0)), 0)
+            # dL_dA_all = torch.cat((dL_dA_all, dL_dA_image.unsqueeze(0)), 0)
             dL_db_all = torch.cat((dL_db_all, dL_db_image.unsqueeze(0)), 0)
+            sum_dL_dA += dL_dA_image
+            sum_dL_dB += dL_db_image
             # dL_db_manual_all = torch.cat((dL_db_manual_all, dL_db_manual_with_softmax.unsqueeze(0)), 0)
             # z_2_all = torch.cat((z_2_all, z_2.unsqueeze(0)), 0)
             # softmax_out_all = torch.cat((softmax_out_all, softmax_out.unsqueeze(0)), 0)
-            # preds_all = torch.cat((preds_all, pred.unsqueeze(0)), 0)
+            preds_all = torch.cat((preds_all, pred.unsqueeze(0)), 0)
     
     if display:
         print(f"b: {model.layers[0].bias.data}")
-        print(f"db: {dL_db_all}")
-        print(f"sum db: {torch.sum(dL_db_all, dim=0)}")
+        # print(f"db: {dL_db_all}")
+        # print(f"sum db: {torch.sum(dL_db_all, dim=0)}")
         # print(f"dA: {dL_dA_all}")
         
-    sum_dL_dB = torch.sum(dL_db_all, dim=0).view(-1, 1)
-    obs_rec = torch.sum(dL_dA_all, dim=0)/sum_dL_dB
+    # sum_dL_dB = torch.sum(dL_db_all, dim=0).view(-1, 1)
+    # obs_rec = torch.sum(dL_dA_all, dim=0)/sum_dL_dB
 
-    
-    
-
-    return obs_rec.cpu(), sum_dL_dB.cpu(), torch.sum(dL_dA_all, dim=0).cpu()
+    obs_rec = sum_dL_dA / sum_dL_dB.view(-1, 1)
+    return obs_rec.cpu(), sum_dL_dB.cpu(), sum_dL_dA.cpu()
 
 def check_search_direction(observation_history, max_norm, min_norm):
     
@@ -1120,7 +1192,7 @@ def find_observations(images, labels, n_classes, control_bias=1e5, hidden_layers
     intervals = [(b_min, b_max)] 
     spacing = (b_max - b_min)/ hidden_layers[0]
     r = 0
-    while spacing >= epsilon:
+    while spacing >= epsilon or r  == 0:
         print(f"Communication round {r}")
         # print(f"current spacing: {spacing}")
         model = set_search_bias(model=model, intervals=intervals, n_hyperplanes=hidden_layers[0], 
@@ -1154,8 +1226,135 @@ def find_observations(images, labels, n_classes, control_bias=1e5, hidden_layers
     print(b_sorted)
 
     model.layers[0].bias.data[0] = b_sorted[-1].item() + 0.1
-    real_weights, _  = check_real_weights(images, labels, model, 0, scale_factor=1, debug=False, display_weights=False)
-    print(real_weights)
+    # real_weights, _  = check_real_weights(images, labels, model, 0, scale_factor=1, debug=False, display_weights=False)
+    # print(real_weights)
     return final_obs, final_dL_dB, sorted_indices
-    
 
+
+def find_observations_cnn(images, labels, n_classes, dataset_name, control_bias=1e5, n_neurons=100, bias_scale=0,  classification_weight_scale=1e-3, 
+                     weights_scale=1 , device='cpu', epsilon=1e-5, obs_atol=1e-5, obs_rtol=1e-7):
+
+
+    image_size = images.shape[1]
+    images = images.to(device)
+    labels = labels.to(device)
+
+    model = prepare_resnet(
+        model_name='resnet18',
+        dataset_name=dataset_name, 
+        n_neurons=n_neurons, 
+        weights_scale=weights_scale, 
+        bias_scale=bias_scale,
+        classification_weight_scale=classification_weight_scale,
+        classification_bias_scale=control_bias,
+        double_precision=True)
+    model = model.to(device)
+
+    b_tensor = - torch.matmul(model.conv1[0].linear.weight[0], torch.transpose(torch.flatten(images, start_dim=1), 0, 1)).cpu().detach()
+    b_sorted, indices = torch.sort(torch.tensor(b_tensor.clone()), dim=0)
+    sorted_indices = torch.argsort(b_tensor, dim=0)
+    print(f"Min spacing between consecutive images: {torch.min(b_sorted[1:] - b_sorted[:-1])}")
+
+    b_1 = - torch.matmul(abs(model.conv1[0].linear.weight[0]).cpu(), torch.ones(torch.flatten(images, start_dim=1).shape[1]).double()).detach()
+    b_2 = - torch.matmul(abs(model.conv1[0].linear.weight[0]).cpu(), (torch.ones(torch.flatten(images, start_dim=1).shape[1]).double() * -1)).detach()
+    b_min = torch.min(b_1, b_2)
+    b_max = torch.max(b_1, b_2)
+    search_history = []
+    # only for debug
+
+    intervals = [(b_min, b_max)] 
+    spacing = (b_max - b_min)/ n_neurons
+    r = 0
+    while spacing >= epsilon or r  == 0:
+        print(f"Communication round {r}")
+        # print(f"current spacing: {spacing}")
+        model = set_search_bias_cnn(model=model, intervals=intervals, n_hyperplanes=n_neurons, 
+                                         round=r, device=device)
+        # get the observations
+        # print(f"Current bias: {model.layers[0].bias.data}")
+        observations, sum_dL_dB, _ = get_observations_no_batch_cnn(images, labels, model, display=False)
+        bias_list = model.conv1[0].linear.bias.data.cpu()
+        search_history.extend((bias_list[i].detach().clone().cpu(), observations[i].detach().clone().cpu(), sum_dL_dB[i].cpu().item()) for i in range(n_neurons))
+
+        # update the intervals
+        intervals, search_history = update_intervals(search_history, atol=obs_atol, rtol=obs_rtol, epsilon=epsilon)
+        bias_history = [i[0].item() for i in search_history]
+        bias_history.sort()
+        if len(intervals) == 0:
+            spacing = 0
+            min_spacing = 0
+
+        else:
+            spacing = max([i[1] - i[0] for i in intervals])
+            min_spacing = min([i[1] - i[0] for i in intervals])
+        print(f"min spacing: {min_spacing}")
+        print(f"max spacing: {spacing}")
+
+        r = r + 1
+    
+    final_obs, final_bias_list, final_dL_dB = clean_observations(search_history, atol=obs_atol, rtol=obs_rtol)
+    print("Final images found at position:")
+    print(final_bias_list)
+    print("Real images at position:")
+    print(b_sorted)
+
+    model.conv1[0].linear.bias.data[0] = b_sorted[-1].item() + 0.1
+    # real_weights, _  = check_real_weights(images, labels, model, 0, scale_factor=1, debug=False, display_weights=False)
+    # print(real_weights)
+    return final_obs, final_dL_dB, sorted_indices 
+
+
+def set_search_bias_cnn(model, intervals, n_hyperplanes, round, device='cpu'):
+
+    if len(intervals) == 1:
+        if round != 0:
+            max_spacing = (intervals[0][1] - intervals[0][0]) / (n_hyperplanes + 2)
+            model.conv1[0].linear.bias.data = torch.linspace(intervals[0][0] + max_spacing, intervals[0][1] - max_spacing, n_hyperplanes).double()
+        else: 
+            max_spacing = (intervals[0][1] - intervals[0][0]) / n_hyperplanes
+            model.conv1[0].linear.bias.data = torch.linspace(intervals[0][0], intervals[0][1], n_hyperplanes).double()
+    
+    else:
+
+        intervals.sort(key=lambda x: x[1] - x[0], reverse=True)
+        mod_hp = n_hyperplanes % len(intervals)
+        n_hp = n_hyperplanes // len(intervals)
+        curr_idx = 0
+        bias_tensor = torch.zeros_like(model.conv1[0].linear.bias.data).double()
+        max_spacing = 0
+        interval_idx = 0
+
+        while curr_idx < n_hyperplanes:
+            curr_b = intervals[interval_idx][0].detach().clone()
+
+            # case with the extra hyperplane
+            remaining_hp = n_hyperplanes - curr_idx
+            if interval_idx < mod_hp:
+                spacing = (intervals[interval_idx][1] - intervals[interval_idx][0]) / (n_hp + 2)
+                for j in range(min(n_hp + 1, remaining_hp)):
+                    bias_tensor[curr_idx] = curr_b + spacing
+                    curr_b += spacing
+                    curr_idx += 1
+                
+
+            # case with no extra hyperplane
+            else:
+                spacing = (intervals[interval_idx][1] - intervals[interval_idx][0]) / (n_hp + 1)
+                for j in range(min(n_hp , remaining_hp)):
+                    bias_tensor[curr_idx] = curr_b + spacing
+                    curr_b += spacing
+                    curr_idx += 1
+
+            if max_spacing < spacing:
+                max_spacing = spacing
+            interval_idx += 1
+
+        # order the bias tensor
+        model.conv1[0].linear.bias.data, _ = torch.sort(bias_tensor)
+        model.conv1[0].linear.bias.data = model.conv1[0].linear.bias.data.to(device)
+
+        # reorder intervals
+        intervals.sort(key=lambda x: x[0])
+
+    model = model.to(device)
+    return model

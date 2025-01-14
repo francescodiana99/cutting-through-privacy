@@ -1,3 +1,4 @@
+import logging
 import torch
 import torchvision
 from torchvision.datasets.folder import default_loader
@@ -51,39 +52,52 @@ class NN(nn.Module):
         return x
     
 
-# TODO: Extend the function to support CIFAR-100 and ImageNet datasets.
-def prepare_data(double_precision=False, dataset='cifar10'):
+def prepare_data(double_precision=False, dataset='cifar10', data_dir='./data/', n_samples=32, model_type='fc'):
     """
     Prepare dataset.
+    Args:
+        double_precision(bool): Whether to use double precision for the computations. Default is False.
+        dataset(str): Name of the dataset to use. Default is 'cifar10'. 
+        Available options are 'cifar10', 'cifar100', 'adult', 'tiny-imagenet' and 'imagenet'.
+        data_dir(str): Directory to store the data. Default is './data/'.
+        n_samples(int): Number of samples to use from the dataset. Default is 32.
+        model_type(str): Type of the model to use. Default is 'fc'. Available options are 'fc' and 'cnn'.
     Returns:
         images(torch.Tensor): Flattened images in the CIFAR-10 dataset.
         all_labels(torch.Tensor): Labels of the images in the CIFAR-10 dataset.
-        dataset(str): Name of the dataset. Default is 'cifar10'. Possible values are 'cifar10', 'cifar100', 'tiny-imagenet' and 'adult'.
+        n_classes(str): Number of classes in the dataset.
     """
 
-
-    transform = transforms.Compose(
-        [transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-
-    batch_size = 1024
-
-    if dataset not in ['cifar10', 'cifar100', 'adult', 'tiny-imagenet']:
+    rnd_g = torch.Generator()
+    if dataset not in ['cifar10', 'cifar100', 'adult', 'tiny-imagenet', 'imagenet']:
         raise NotImplementedError("Dataset not supported.")
     
+    if dataset == 'imagenet':
+        transform = transforms.Compose([
+            transforms.Resize(256),
+            # transforms.CenterCrop(224),
+            transforms.ToTensor()
+            # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+    else:
+        transform = transforms.Compose(
+            [transforms.ToTensor()])
+            #  transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    
     if dataset == 'cifar10':
-        trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+        trainset = torchvision.datasets.CIFAR10(root=data_dir, train=True,
                                                 download=True, transform=transform)
         n_classes = 10
     elif dataset == 'cifar100':
-        trainset = torchvision.datasets.CIFAR100(root='./data', train=True,
+        trainset = torchvision.datasets.CIFAR100(root=data_dir, train=True,
                                                 download=True, transform=transform)
         n_classes = 100
     elif dataset == 'adult':
-        if os.path.exists('./data/adult'):
-            adult_set = AdultDataset(cache_dir='./data/adult', download=False, mode='train', seed=42)
+        if os.path.exists(data_dir):
+            adult_set = AdultDataset(cache_dir=data_dir, download=False, mode='train', seed=42)
         else:
-            adult_set = AdultDataset(cache_dir='./data/adult', download=True, mode='train', seed=42)
+            adult_set = AdultDataset(cache_dir=data_dir, download=True, mode='train', seed=42)
         
         if double_precision:
             features_tensor = torch.tensor(adult_set.features, dtype=torch.double)
@@ -92,30 +106,45 @@ def prepare_data(double_precision=False, dataset='cifar10'):
             features_tensor = torch.tensor(adult_set.features, dtype=torch.float)
             labels_tensor = torch.tensor(adult_set.labels, dtype=torch.int)
         n_classes = 1
-        return features_tensor, labels_tensor
+        return features_tensor, labels_tensor, n_classes
     
     elif dataset == 'tiny-imagenet':
-        dataset = TinyImageNetDataset(root='./data/tiny-imagenet-200', transform=transform)
+        dataset = TinyImageNetDataset(root=data_dir, transform=transform)
         trainset = dataset.get_train_dataset()
         n_classes = 200
-
-        
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
-                                            shuffle=True, num_workers=2)
     
-    for i, data in enumerate(trainloader, 0):
-        inputs, labels = data
-        if i == 0:
-            all_labels = labels
-            images = torch.flatten(inputs, start_dim=1)
-        else:
-            all_labels = torch.cat((all_labels, labels))
-            images = torch.cat((images, torch.flatten(inputs, start_dim=1)))
+    elif dataset == 'imagenet':
+        dataset = torchvision.datasets.ImageNet(root=data_dir, split='val', transform=transform)
+        trainset = dataset
+        n_classes = 1000
 
+    random_indices= torch.randperm(len(trainset), generator=rnd_g)[:n_samples]
+    trainset = torch.utils.data.Subset(trainset, random_indices)
+    
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=n_samples,
+                                            shuffle=True, num_workers=2)
+    if model_type == 'fc':
+        for i, data in enumerate(trainloader, 0):
+            inputs, labels = data
+            if i == 0:
+                all_labels = labels
+                images = torch.flatten(inputs, start_dim=1)
+            else:
+                all_labels = torch.cat((all_labels, labels))
+                images = torch.cat((images, torch.flatten(inputs, start_dim=1)))
+    else:
+        for i, data in enumerate(trainloader, 0):
+            inputs, labels = data
+            if i == 0:
+                all_labels = labels
+                images = inputs
+            else:
+                all_labels = torch.cat((all_labels, labels))
+                images = torch.cat((images, inputs))
+                
     if double_precision:
-        images = images.double()
-        labels = labels.double()
-
+                images = images.double()
+                labels = labels.double()
     return images, all_labels, n_classes
 
 
@@ -134,51 +163,14 @@ def set_seeds(seed):
     np.random.seed(seed)
     random.seed(seed)    
 
-
-def parse_args():
+def configure_logging():
     """
-    Parse the arguments for the script.
+    Set up logging based on verbosity level
     """
+    # TODO: this should be fixed. Opacus changes the default level to WARNING
+    logging.basicConfig(level=logging.INFO)
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+    root_logger.setLevel(logging.INFO)
 
-    parser = argparse.ArgumentParser()
-    
-    parser.add_argument('--n_classes',
-                        type=int, 
-                        default=10,
-                        help='Number of classes in the dataset.')
-    
-    parser.add_argument("--n_samples",
-                        type=int,
-                        help="Number of samples to use for the search.")
-    
-    parser.add_argument("--device",
-                        type=str,
-                        default='cpu',
-                        help="Device to use for the computation.")
-    
-    parser.add_argument("--display",
-                        action='store_true',
-                        help="Display the images.",
-                        default=False)
-    
-    parser.add_argument("--dataset",
-                        type=str,
-                        default='cifar10',
-                        help="Dataset to use for the experiment. Possible values are 'cifar10', 'tiny-imagenet' and 'adult'.")
-    
-    parser.add_argument("--hidden_layers",
-                        nargs='+' ,
-                        help="Hidden layers structure of the neural network.")
-    
-    parser.add_argument("--class_bias", 
-                        type=float,
-                        default=1e12,
-                        help="Classification bias value")
-    
-    parser.add_argument("--weight_scale",
-                        type=float,
-                        default=1,
-                        help="Scale factor for the weight initialization.")
-    
-    
-    return parser.parse_args()

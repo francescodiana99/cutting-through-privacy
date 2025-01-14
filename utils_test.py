@@ -20,6 +20,7 @@ import time
 from utils_search import *
 
 from skimage.metrics import structural_similarity as ssim
+from skimage.metrics import peak_signal_noise_ratio as psnr
 
 
 def check_span_artificial(observation, images_reconstructed, observation_points, orth_subspace):
@@ -55,6 +56,17 @@ def get_activations(acts):
             acts[i] = output[i]
     return forward_hook
 
+def get_class_inputs(input_dict, i):
+    def forward_hook(module, inputs, outputs):
+        if input_dict.get(i) is None:
+            input_dict[i] = [inputs[0]]
+        else:
+            input_dict[i].append(inputs[0])
+    return forward_hook
+
+
+def capture_gradient(module, grad_input, grad_output):
+    print("Gradient of x_out:", grad_output[0])
 
 def check_real_weights(images, labels, model, direction, scale_factor=1, debug=False, display_weights=False):
     """Get the weight distribution associated to the images in the observation"""
@@ -179,6 +191,8 @@ def get_ssim(img_1, img_2, dataset_name):
         H, W, C = 32, 32, 3
     elif dataset_name == 'tiny-imagenet':
         H, W, C = 64, 64, 3
+    elif dataset_name == 'imagenet':
+        H, W, C = 224, 224, 3
     else:
         raise NotImplementedError("Dataset not supported.")
 
@@ -189,16 +203,35 @@ def get_ssim(img_1, img_2, dataset_name):
     return ssim_metric
 
 
-def couple_images(img_1_list, img_2_list):
+def get_psnr(input_1, input_2, data_range=1):
     """
-    Find the correspondencies between images, according to SSIM"""
+    Compute the PSNR between two inputs.
+    """
+    input_1 = input_1.cpu().numpy()
+    input_2 = input_2.cpu().numpy()
+    psnr_metric = psnr(input_1, input_2, data_range=data_range) 
+
+    return psnr_metric
+
+
+def couple_images(rec_inputs_list, true_inputs_list, dataset_name='cifar10'):
+    """
+    Find the correspondencies between images, according to SSIM if data are images, otherwise according to the maximum norm difference."""
     couples = []
-    for i in range(len(img_1_list)):
-        img_1 = img_1_list[i]
-        ssim_list = [get_ssim(img_1, img_2) for img_2 in img_2_list]
-        max_ssim = max(ssim_list)
-        idx = ssim_list.index(max_ssim)
-        couples.append((img_1_list[i], img_2_list[idx]))
+    if dataset_name in ['cifar10', 'cifar100', 'tiny-imagenet', 'imagenet']:
+        for i in range(len(rec_inputs_list)):
+            img_1 = rec_inputs_list[i]
+            ssim_list = [get_ssim(img_1, img_2, dataset_name) for img_2 in true_inputs_list]
+            max_ssim = max(ssim_list)
+            idx = ssim_list.index(max_ssim)
+            couples.append((rec_inputs_list[i], true_inputs_list[idx]))
+    else:
+        for i in range(len(rec_inputs_list)):
+            img_1 = rec_inputs_list[i]
+            max_diff_list = [torch.norm(img_1 - img_2).item() for img_2 in true_inputs_list]
+            max_diff = max(max_diff_list)
+            idx = max_diff_list.index(max_diff)
+            couples.append((rec_inputs_list[i], true_inputs_list[idx]))
     return couples
 
 
