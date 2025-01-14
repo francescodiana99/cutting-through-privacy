@@ -26,6 +26,17 @@ from attacks.sra import HyperplaneSampleReconstructionAttack
 from models.resnets import ResNet, resnet_depths_to_config
 
 
+INPUT_DIM = {
+    "imagenet": 3*224*224,
+    "cifar10": 3*32*32,
+    "cifar100": 3*32*32,
+             }
+N_CLASSES = {
+    "imagenet": 1000,
+    "cifar10": 10,
+    "cifar100": 100,
+                }
+
 def parse_args():
     """
     Parse the arguments for the script.
@@ -170,14 +181,12 @@ def main():
 
     dataset_type = "tabular" if args.dataset == 'adult' else "image"
 
-    inputs, labels, n_classes = prepare_data(double_precision=args.double_precision,
-                                             dataset=args.dataset, n_samples=args.n_samples)
+    n_classes = N_CLASSES[args.dataset]
+    input_dim = INPUT_DIM[args.dataset]
 
-    sample = np.random.choice(range(inputs.shape[0]), size=args.n_samples, replace=False)
-    client_inputs = inputs[sample]
 
     model = FCNet(
-        input_dimension=client_inputs.shape[1], 
+        input_dimension=input_dim, 
         output_dimension=n_classes, 
         classification_weight_scale=args.classification_weight_scale,
         hidden_layers=args.hidden_layers,
@@ -197,13 +206,15 @@ def main():
         atol=args.atol,
         rtol=args.rtol,
         double_precision=True,
-        batch_size=10,
+        batch_size=args.n_samples,
         parallelize=False, 
     )
 
     rec_input = sra_attack.execute_attack(debug=args.debug, n_rounds=args.n_rounds)
 
     inputs_list = [sra_attack.inputs[i] for i in range(sra_attack.inputs.shape[0])]
+
+    logging.info("Reconstruction completed. Pairing samples with true images...")
     # it means we have all the images
     if len(rec_input) == sra_attack.inputs_idx.shape[0]:
         paired_inputs = [(rec_input[i], sra_attack.inputs[sra_attack.inputs_idx[i]]) for i in range(len(rec_input))]
@@ -216,6 +227,7 @@ def main():
         ssim_list, avg_ssim, psnr_list, avg_psnr = sra_attack._evaluate_attack(paired_inputs,
                                                                             dataset_name=args.dataset)
         logging.info("-----------Metrics-----------")
+        logging.info(f"Number of reconstructed samples: {len(paired_inputs)}")
         logging.info(f"Average SSIM: {avg_ssim}")
         logging.info(f"Average PSNR: {avg_psnr}")
         
@@ -223,6 +235,7 @@ def main():
         max_diff_list, avg_max_diff, l2_norm_diff_list = sra_attack._evaluate_attack(paired_inputs,
                                                                                     dataset_name=args.dataset)
         logging.info("-----------Metrics-----------")
+        logging.info(f"Number of reconstructed samples: {len(paired_inputs)}")
         logging.info(f"Average max diff: {avg_max_diff}")
         logging.info(f"Average L2 norm diff: {l2_norm_diff_list}")
 

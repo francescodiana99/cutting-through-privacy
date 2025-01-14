@@ -75,7 +75,7 @@ def prepare_data(double_precision=False, dataset='cifar10', data_dir='./data/', 
     if dataset == 'imagenet':
         transform = transforms.Compose([
             transforms.Resize(256),
-            # transforms.CenterCrop(224),
+            transforms.CenterCrop(224),
             transforms.ToTensor()
             # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
@@ -146,7 +146,6 @@ def prepare_data(double_precision=False, dataset='cifar10', data_dir='./data/', 
                 images = images.double()
                 labels = labels.double()
     return images, all_labels, n_classes
-
 
 def set_seeds(seed):
     """
