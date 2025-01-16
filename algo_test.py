@@ -545,19 +545,31 @@ def couple_data(reconstructed_data, real_data):
 
 
 def test_parallel_attack():
+    INPUT_DIM = {
+    "imagenet": 3*224*224,
+    "cifar10": 3*32*32,
+    "cifar100": 3*32*32,
+             }
+    N_CLASSES = {
+        "imagenet": 1000,
+        "cifar10": 10,
+        "cifar100": 100,
+                }
+
+
     # args = parse_args()
-    dataset_name = 'cifar10'
-    num_samples = 10
-    images, all_labels, n_classes = prepare_data(double_precision=True, dataset=dataset_name,n_samples=num_samples, model_type='fc')
+    dataset_name = 'imagenet'
+    num_samples = 100
+    images, all_labels, n_classes = prepare_data(double_precision=True, dataset=dataset_name,n_samples=num_samples, model_type='fc', data_dir='~/data/imagenet')
 
 
     sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
     images_client = images[sample]
     labels_client = all_labels[sample]
-    strips_obs, dL_db_history, corr_idx = find_observations(images_client, labels_client, n_classes=n_classes, control_bias=1e13, hidden_layers=[100], 
-                      input_weights_scale=1e-9, classification_weight_scale=1e-3, device='cuda', epsilon=1e-12, obs_atol=1e-5, obs_rtol=1e-6)
-    # strips_obs, dL_db_history, corr_idx = find_observations_cnn(images_client, labels_client, n_classes=n_classes, dataset_name=dataset_name, control_bias=1e12, n_neurons=100, 
-    #                   weights_scale=1e-5, classification_weight_scale=1e-3, device='cuda', epsilon=1e-6, obs_atol=1e-5, obs_rtol=1e-6)
+    # strips_obs, dL_db_history, corr_idx = find_observations(images_client, labels_client, n_classes=n_classes, control_bias=1e13, hidden_layers=[100], 
+    #                   input_weights_scale=1e-9, classification_weight_scale=1e-3, device='cuda', epsilon=1e-12, obs_atol=1e-5, obs_rtol=1e-6)
+    strips_obs, dL_db_history, corr_idx = find_observations_cnn(images_client, labels_client, n_classes=n_classes, dataset_name=dataset_name, control_bias=1e12, n_neurons=1000, 
+                      weights_scale=1e-6, classification_weight_scale=1e-2, device='cuda', epsilon=1e-8, obs_atol=1e-5, obs_rtol=1e-6)
     images_reconstructed = [strips_obs[0]]
     # restore_images([images_reconstructed[0], images_client[0]], device=args.device, display=True, title="Reconstructed image 0")
 
@@ -578,7 +590,11 @@ def test_parallel_attack():
     if dataset_name != 'adult':
         images_client = images_client.flatten(start_dim=1)
         # paired_images = couple_images(images_reconstructed, images_client)
-        paired_images = [(images_reconstructed[i], images_client[corr_idx[i]]) for i in range(len(images_reconstructed))]
+        
+        if len(images_reconstructed) == images_client.shape[0]:
+            paired_images = [(images_reconstructed[i], images_client[corr_idx[i]]) for i in range(len(images_reconstructed))]
+        else:
+            paired_images = couple_images(images_reconstructed, images_client, dataset_name=dataset_name)
         count = 0
         for k in range(len(paired_images)):
             ssim = get_ssim(paired_images[k][0], paired_images[k][1], dataset_name=dataset_name)

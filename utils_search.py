@@ -455,12 +455,14 @@ def get_observations_no_batch_cnn(images, labels, model, display=False):
     criterion = nn.CrossEntropyLoss()
     model.train()
     inputs = {}
-
+    inputs_conv = {}
+    outputs_conv = {}
     # labels = labels.double()
 
     for i in range(images.shape[0]):
         if i == 4:
             h = model.fc.register_forward_hook(get_class_inputs(inputs, i))
+            h1 = model.conv1[1].register_forward_hook(get_conv_res(inputs_conv, outputs_conv, i))
         optimizer.zero_grad()
         pred = model(images[i][None, ...])
 
@@ -472,7 +474,7 @@ def get_observations_no_batch_cnn(images, labels, model, display=False):
 
         if i == 4: 
             print(model.conv1[0].output_grad)
-            print(inputs[4])
+            # print(inputs[4])
             softmax = nn.Softmax(dim=1)
             print(f"min pred: {torch.min(softmax(pred)).item()}")
             print(f"max pred: {torch.max(softmax(pred)).item()}")
@@ -494,6 +496,7 @@ def get_observations_no_batch_cnn(images, labels, model, display=False):
             preds_all = torch.cat((preds_all, pred.unsqueeze(0)), 0)
         if i == 4:
             h.remove()
+            h1.remove()
     
     if display:
         print(f"b: {model.conv1[0].linear.bias.data}")

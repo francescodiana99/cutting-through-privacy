@@ -114,13 +114,36 @@ def prepare_resnet(
                 m.weight = nn.Parameter(class_weights.repeat(1, m.weight.shape[1]) * classification_weight_scale)
                 if m.bias is not None:
                     m.bias = nn.Parameter(torch.ones_like(m.bias) * classification_bias_scale)
+            
+            elif isinstance(m, nn.BatchNorm2d):
+                m.track_running_stats = False
         return model
+
+    # def _initialize_malicious_weight(model, conv_weights_scale, conv_bias_scale, classification_weight_scale, classification_bias_scale):
+    #     """Initialize resnet weights"""
+        
+    #     for m in model.modules():
+    #         if isinstance(m, nn.Conv2d):
+    #             nn.init.constant_(m.weight, 0)
+    #             if m.bias is not None:
+    #                 m.bias = nn.Parameter(m.bias * conv_bias_scale)
+    #         elif isinstance(m, nn.Linear):
+    #             class_weights = torch.randn(m.weight.shape[0], 1)
+    #             m.weight = nn.Parameter(class_weights.repeat(1, m.weight.shape[1]) * classification_weight_scale)
+    #             if m.bias is not None:
+    #                 m.bias = nn.Parameter(torch.ones_like(m.bias) * classification_bias_scale)
+            
+    #         elif isinstance(m, nn.BatchNorm2d):
+    #             m.track_running_stats = False
+    #     return model
     
     def _insert_malicious_block(model, n_neurons, weights_scale):
         """Insert malicious block in the model."""
         for module in model.modules():
             if isinstance(module, nn.Conv2d) or isinstance(module, nn.Linear):  
                 replacement = nn.Sequential(MaliciousBlock(data_shape=data_shape, n_neurons=n_neurons, weights_scale=weights_scale), module)
+                if isinstance(module, nn.Conv2d):
+                    nn.init.dirac_(module.weight)
                 replace_module_by_instance(model, module, replacement)
                 break
         return model
