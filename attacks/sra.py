@@ -543,6 +543,10 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
             sampled_weights = torch.abs(torch.randn(K, int(math.ceil(N / 2))) * sigma) * -1
 
             negative_samples = sampled_weights[:, :-1]
+        else:
+            
+            sampled_weights = torch.abs(torch.randn(K, int(N / 2)) * sigma) * -1
+            negative_samples = sampled_weights
         positive_samples = -scale_factor * sampled_weights
 
         final_weights = torch.empty(K, N)
