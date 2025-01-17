@@ -12,9 +12,6 @@ import itertools
 
 import matplotlib.pyplot as plt
 
-import bisect
-import random
-import math
 import argparse
 import os
 
@@ -22,7 +19,7 @@ from utils_search import *
 from utils_misc import *
 from utils_test import * 
 
-from attacks.sra import HyperplaneSampleReconstructionAttack
+from attacks.sra import HyperplaneSampleReconstructionAttack, CuriousAbandonHonestyAttack
 from models.resnets import ResNet, resnet_depths_to_config
 
 
@@ -30,11 +27,15 @@ INPUT_DIM = {
     "imagenet": 3*224*224,
     "cifar10": 3*32*32,
     "cifar100": 3*32*32,
+    "adult": 97,
+    "harus": 561
              }
 N_CLASSES = {
     "imagenet": 1000,
     "cifar10": 10,
     "cifar100": 100,
+    "adult": 1,
+    "harus": 6
                 }
 
 def parse_args():
@@ -167,6 +168,26 @@ def parse_args():
                         default=False
                         )
     
+
+    parser.add_argument("--attack_name",
+                        type=str,
+                        help="Name of the attack to use."
+                        )
+    parser.add_argument("--mu",
+                        type=float,
+                        help="Mean of the normal distribution for CaH attack."
+                        )
+    parser.add_argument("--sigma",
+                        type=float,
+                        help="Standard deviation of the normal distribution for CaH attack."
+                        )
+    
+    parser.add_argument("--scale_factor",
+                        type=float,
+                        help="Scale factor for the CaH attack."
+                        )   
+    
+    
     
     return parser.parse_args()
 
@@ -179,65 +200,94 @@ def main():
 
     configure_logging()
 
-    dataset_type = "tabular" if args.dataset == 'adult' else "image"
+    dataset_type = "image" if args.dataset in ['cifar10', 'cifar100', 'tiny-imagenet', 'imagenet'] else 'tabular'
 
     n_classes = N_CLASSES[args.dataset]
     input_dim = INPUT_DIM[args.dataset]
 
+    if args.attack_name == 'hsra':
+        model = FCNet(
+            input_dimension=input_dim, 
+            output_dimension=n_classes, 
+            classification_weight_scale=args.classification_weight_scale,
+            hidden_layers=args.hidden_layers,
+            classification_bias=args.classification_bias,
+            input_weights_scale=args.input_weights_scale, 
+            hidden_weights_scale=args.hidden_weights_scale, 
+            hidden_bias_scale=args.hidden_bias_scale,
+            honest=False
+            )
 
-    model = FCNet(
-        input_dimension=input_dim, 
-        output_dimension=n_classes, 
-        classification_weight_scale=args.classification_weight_scale,
-        hidden_layers=args.hidden_layers,
-        classification_bias=args.classification_bias,
-        input_weights_scale=args.input_weights_scale, 
-        hidden_weights_scale=args.hidden_weights_scale, 
-        hidden_bias_scale=args.hidden_bias_scale
+        sra_attack = HyperplaneSampleReconstructionAttack(
+            dataset_name=args.dataset,
+            data_dir=args.data_dir,
+            model=model,
+            device=args.device,
+            seed=args.seed,
+            epsilon=args.epsilon,
+            atol=args.atol,
+            rtol=args.rtol,
+            double_precision=args.double_precision,
+            batch_size=args.n_samples,
+            parallelize=False, 
         )
 
-    sra_attack = HyperplaneSampleReconstructionAttack(
-        dataset_name=args.dataset,
-        data_dir=args.data_dir,
-        model=model,
-        device=args.device,
-        seed=args.seed,
-        epsilon=args.epsilon,
-        atol=args.atol,
-        rtol=args.rtol,
-        double_precision=True,
-        batch_size=args.n_samples,
-        parallelize=False, 
-    )
+        rec_input = sra_attack.execute_attack(debug=args.debug, n_rounds=args.n_rounds)
 
-    rec_input = sra_attack.execute_attack(debug=args.debug, n_rounds=args.n_rounds)
+    
+    elif args.attack_name == 'cah':
+        model = FCNet(
+            input_dimension=input_dim, 
+            output_dimension=n_classes,
+            hidden_layers=args.hidden_layers,
+            honest=True)
+        
+        sra_attack = CuriousAbandonHonestyAttack(
+            model=model,
+            device=args.device,
+            dataset_name=args.dataset,
+            data_dir=args.data_dir,
+            batch_size=args.n_samples,
+            seed=args.seed,
+            double_precision=args.double_precision,
+            atol=args.atol,
+            rtol=args.rtol,
+            parallelize=False
+        )
+        rec_input = sra_attack.execute_attack(n_rounds=args.n_rounds, mu=args.mu, sigma=args.sigma, scale_factor=args.scale_factor)
 
-    inputs_list = [sra_attack.inputs[i] for i in range(sra_attack.inputs.shape[0])]
+    else:
+        raise ValueError(f"Attack name {args.attack_name} is not supported.")
+
+
+    inputs_list = [sra_attack.inputs[i].cpu() for i in range(sra_attack.inputs.shape[0])]
 
     logging.info("Reconstruction completed. Pairing samples with true images...")
     # it means we have all the images
-    if len(rec_input) == sra_attack.inputs_idx.shape[0]:
-        paired_inputs = [(rec_input[i], sra_attack.inputs[sra_attack.inputs_idx[i]]) for i in range(len(rec_input))]
+    if len(rec_input) == sra_attack.inputs.shape[0] and args.attack_name == 'hsra':
+        paired_inputs = [(rec_input[i], sra_attack.inputs[sra_attack.inputs_idx[i]].cpu()) for i in range(len(rec_input))]
     else:
-        paired_inputs = couple_images(rec_input, inputs_list, dataset_name=args.dataset)
+        paired_inputs = couple_inputs(rec_input, inputs_list, dataset_name=args.dataset)
     if args.display:
-        restore_images([paired_inputs[0][0], paired_inputs[0][1]], device=args.device, display=True)
+        restore_images([paired_inputs[0][0], paired_inputs[0][1].cpu()], device=args.device, display=True)
     
     if dataset_type != 'tabular':
-        ssim_list, avg_ssim, psnr_list, avg_psnr = sra_attack._evaluate_attack(paired_inputs,
+        ssim_list, avg_ssim, psnr_list, avg_psnr, n_perfect_reconstructed = sra_attack.evaluate_attack(paired_inputs,
                                                                             dataset_name=args.dataset)
         logging.info("-----------Metrics-----------")
-        logging.info(f"Number of reconstructed samples: {len(paired_inputs)}")
+        logging.info(f"Number of samples: {len(paired_inputs)}")
+        logging.info(f"Number of perfect reconstructions: {n_perfect_reconstructed}")
         logging.info(f"Average SSIM: {avg_ssim}")
         logging.info(f"Average PSNR: {avg_psnr}")
         
     else:
-        max_diff_list, avg_max_diff, l2_norm_diff_list = sra_attack._evaluate_attack(paired_inputs,
-                                                                                    dataset_name=args.dataset)
+        norm_diff_list, avg_norm_diff, max_norm_diff, max_diff, n_perfect_reconstructed = sra_attack.evaluate_attack(paired_inputs)
         logging.info("-----------Metrics-----------")
-        logging.info(f"Number of reconstructed samples: {len(paired_inputs)}")
-        logging.info(f"Average max diff: {avg_max_diff}")
-        logging.info(f"Average L2 norm diff: {l2_norm_diff_list}")
+        logging.info(f"Number of samples: {len(paired_inputs)}")
+        logging.info(f"Number of perfect reconstructions: {n_perfect_reconstructed}")
+        logging.info(f"Max diff: {max_diff}")
+        logging.info(f"Max norm diff: {max_norm_diff}")
+        logging.info(f"Average  norm diff: {avg_norm_diff}")
 
         
     os.makedirs(args.results_path, exist_ok=True)
@@ -247,16 +297,19 @@ def main():
 
     if dataset_type != 'tabular':
         result_dict = {
-            'ssim_list': ssim_list,
+            'ssim_list': np.array(ssim_list).astype(np.double).tolist(),
             'avg_ssim': avg_ssim,
-            'psnr_list': psnr_list,
-            'avg_psnr': avg_psnr
+            'psnr_list': np.array(psnr_list).astype(np.double).tolist(),
+            'avg_psnr': avg_psnr,
+            'n_perfect_reconstructed': n_perfect_reconstructed
         }
     else:
         result_dict = {
-            'max_diff_list': max_diff_list,
-            'avg_max_diff': avg_max_diff,
-            'l2_norm_diff_list': l2_norm_diff_list
+            'max_norm_diff': max_norm_diff,
+            'avg_norm_diff': avg_norm_diff,
+            'max_diff': max_diff,
+            'n_perfect_reconstructed': n_perfect_reconstructed,
+            'l2_norm_diff_list': np.array(norm_diff_list).astype(np.double).tolist()
         }
     results_path = os.path.join(args.results_path, 'results.json')
     

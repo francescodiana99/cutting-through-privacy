@@ -20,6 +20,7 @@ import os
 import time
 
 from datasets.adult.adult import AdultDataset
+from datasets.harus.harus import HARUSDataset
 from datasets.tiny_imagenet.tiny_imagenet import TinyImageNetDataset
 
 
@@ -69,7 +70,7 @@ def prepare_data(double_precision=False, dataset='cifar10', data_dir='./data/', 
     """
 
     rnd_g = torch.Generator()
-    if dataset not in ['cifar10', 'cifar100', 'adult', 'tiny-imagenet', 'imagenet']:
+    if dataset not in ['cifar10', 'cifar100', 'adult', 'harus', 'tiny-imagenet', 'imagenet']:
         raise NotImplementedError("Dataset not supported.")
     
     if dataset == 'imagenet':
@@ -101,12 +102,41 @@ def prepare_data(double_precision=False, dataset='cifar10', data_dir='./data/', 
         
         if double_precision:
             features_tensor = torch.tensor(adult_set.features, dtype=torch.double)
-            labels_tensor = torch.tensor(adult_set.targets, dtype=torch.long)
+            labels_tensor = torch.tensor(adult_set.targets, dtype=torch.double)
         else:
             features_tensor = torch.tensor(adult_set.features, dtype=torch.float)
-            labels_tensor = torch.tensor(adult_set.labels, dtype=torch.int)
+            labels_tensor = torch.tensor(adult_set.targets, dtype=torch.float)
+
+        sample_idx = torch.randperm(len(labels_tensor), generator=rnd_g)[:n_samples]
+
+        features_tensor = features_tensor[sample_idx]
+        labels_tensor = labels_tensor[sample_idx]
         n_classes = 1
+    
         return features_tensor, labels_tensor, n_classes
+    
+    elif dataset == 'harus':
+        if os.path.exists(data_dir):
+            harus_set = HARUSDataset(cache_dir=data_dir, download=False, mode='train')
+        else:
+            harus_set = HARUSDataset(cache_dir=data_dir, download=True, mode='train')
+
+        if double_precision:
+            features_tensor = torch.tensor(harus_set.get_features(), dtype=torch.double)
+            labels_tensor = torch.tensor(harus_set.get_targets(), dtype=torch.long)
+        else:
+            features_tensor = torch.tensor(harus_set.get_features(), dtype=torch.float)
+            labels_tensor = torch.tensor(harus_set.get_targets(), dtype=torch.int)
+
+        sample_idx = torch.randperm(len(labels_tensor), generator=rnd_g)[:n_samples]
+
+        features_tensor = features_tensor[sample_idx]
+        labels_tensor = labels_tensor[sample_idx]
+        n_classes = 6
+
+        return features_tensor, labels_tensor, n_classes
+
+        
     
     elif dataset == 'tiny-imagenet':
         dataset = TinyImageNetDataset(root=data_dir, transform=transform)

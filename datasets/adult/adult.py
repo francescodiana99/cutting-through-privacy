@@ -212,7 +212,7 @@ class AdultDataset(Dataset):
         Returns the number of samples in the dataset
         
         Returns:
-            int: Number of samples in the dataset.
+            int: Number of samples in the dataset
         """
 
         return len(self.dataset)

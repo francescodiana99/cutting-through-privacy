@@ -4,8 +4,8 @@ import torch
 class FCNet(nn.Module):
     """
     Fully connected neural network with ReLU activation functions."""
-    def __init__(self, input_dimension, output_dimension, classification_weight_scale, hidden_layers=[1], initialization='equal', classification_bias=None,
-                 input_weights_scale=1, hidden_weights_scale=1e-3, hidden_bias_scale=1e-3):
+    def __init__(self, input_dimension=1, output_dimension=1, classification_weight_scale=1, hidden_layers=[1], initialization='equal', classification_bias=None,
+                 input_weights_scale=1, hidden_weights_scale=1e-3, hidden_bias_scale=1e-3, honest=False):
         """
         Args:
             input_dimension(int): Dimension of the input.
@@ -17,6 +17,7 @@ class FCNet(nn.Module):
             input_weights_scale(float): Scale of the weights of the input layer. Default is 1.
             hidden_weights_scale(float): Scale of the weights of the hidden layers. Default is 1e-3.
             hidden_bias_scale(float): Scale of the bias of the hidden layers. Default is 1e-3.
+            honest(bool): Whether the model is maliciously initialized. Default is False.
         """
         super(FCNet, self).__init__()
 
@@ -24,6 +25,7 @@ class FCNet(nn.Module):
         self.classification_weight_scale = classification_weight_scale
         self.hidden_weights_scale = hidden_weights_scale
         self.hidden_bias_scale = hidden_bias_scale
+        self.honest = honest
 
         if hidden_layers is None:
             raise ValueError("You need to specify at least one hidden layer.")
@@ -39,13 +41,14 @@ class FCNet(nn.Module):
                 self.layers.append(nn.ReLU())
             
             self.layers.append(nn.Linear(hidden_layers[-1], output_dimension))
-            if classification_bias is not None:
-                self.layers[-1].bias.data = torch.ones_like(self.layers[-1].bias) * classification_bias
-            
-            if len(hidden_layers) > 1:
-                self._initialize_hidden_layers()
-            
-            self._initialize_class_weights()
+            if not self.honest:
+                if classification_bias is not None:
+                    self.layers[-1].bias.data = torch.ones_like(self.layers[-1].bias) * classification_bias
+                
+                if len(hidden_layers) > 1:
+                    self._initialize_hidden_layers()
+                
+                self._initialize_class_weights()
 
     
     def _initialize_hidden_layers(self):

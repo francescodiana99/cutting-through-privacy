@@ -64,6 +64,15 @@ def get_class_inputs(input_dict, i):
             input_dict[i].append(inputs[0])
     return forward_hook
 
+def get_conv_res(input_dict, output_dict, i):
+    def forward_hook(module, inputs, outputs):
+        if input_dict.get(i) is None:
+            input_dict[i] = [inputs[0]]
+        if output_dict.get(i) is None:
+            output_dict[i] = [outputs[0]]
+        else:
+            input_dict[i].append(inputs[0])
+    return forward_hook
 
 def capture_gradient(module, grad_input, grad_output):
     print("Gradient of x_out:", grad_output[0])
@@ -214,7 +223,7 @@ def get_psnr(input_1, input_2, data_range=1):
     return psnr_metric
 
 
-def couple_images(rec_inputs_list, true_inputs_list, dataset_name='cifar10'):
+def couple_inputs(rec_inputs_list, true_inputs_list, dataset_name='cifar10'):
     """
     Find the correspondencies between images, according to SSIM if data are images, otherwise according to the maximum norm difference."""
     couples = []
@@ -224,14 +233,14 @@ def couple_images(rec_inputs_list, true_inputs_list, dataset_name='cifar10'):
             ssim_list = [get_ssim(img_1, img_2, dataset_name) for img_2 in true_inputs_list]
             max_ssim = max(ssim_list)
             idx = ssim_list.index(max_ssim)
-            couples.append((rec_inputs_list[i], true_inputs_list[idx]))
+            couples.append((rec_inputs_list[i], true_inputs_list[idx], max_ssim))
     else:
         for i in range(len(rec_inputs_list)):
             img_1 = rec_inputs_list[i]
-            max_diff_list = [torch.norm(img_1 - img_2).item() for img_2 in true_inputs_list]
-            max_diff = max(max_diff_list)
-            idx = max_diff_list.index(max_diff)
-            couples.append((rec_inputs_list[i], true_inputs_list[idx]))
+            diff_list = [torch.norm(img_1 - img_2).item() for img_2 in true_inputs_list]
+            min_diff = min(diff_list)
+            idx = diff_list.index(min_diff)
+            couples.append((rec_inputs_list[i], true_inputs_list[idx], min_diff))
     return couples
 
 

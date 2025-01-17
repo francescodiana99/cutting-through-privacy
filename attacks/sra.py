@@ -1,3 +1,4 @@
+from collections import defaultdict
 import torch
 from torch import nn
 from utils_misc import prepare_data
@@ -5,7 +6,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 from utils_test import get_psnr, get_ssim
 import logging
-
+import math 
 class BaseSampleReconstructionAttack(ABC):
     """
     Class representing a sample reconstruction attack in federated learning.
@@ -31,6 +32,13 @@ class BaseSampleReconstructionAttack(ABC):
     def execute_attack(self):
         """
         Execute the attack on the provided dataset.
+        """
+        pass
+
+    @abstractmethod
+    def evaluate_attack(self):
+        """
+        Evaluate the attack.
         """
         pass
 
@@ -67,6 +75,7 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         self.rtol = rtol
         self.batch_size = batch_size
         self.data_dir = data_dir
+        self.dataset_type = "image" if dataset_name in ['cifar10', 'cifar100', 'imagenet'] else "tabular"
 
         self.inputs, self.labels, self.n_classes = self._get_dataset()
         self.model.to(self.device)
@@ -115,9 +124,12 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         b_tensor = - torch.matmul(self.model.layers[0].weight[0], torch.transpose(self.inputs, 0, 1)).cpu().detach()
         b_sorted, indices = torch.sort(torch.tensor(b_tensor.clone().detach()), dim=0)
         sorted_indices = torch.argsort(b_tensor, dim=0)
-
-        b_1 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), torch.ones(self.inputs.shape[1]).double()).detach()
-        b_2 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), (torch.ones(self.inputs.shape[1]).double() * -1)).detach()
+        if self.double_precision:
+            b_1 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), torch.ones(self.inputs.shape[1]).double()).detach()
+            b_2 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), (torch.ones(self.inputs.shape[1]).double() * -1)).detach()
+        else:
+            b_1 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), torch.ones(self.inputs.shape[1])).detach()
+            b_2 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), (torch.ones(self.inputs.shape[1]) * -1)).detach()
         b_min = torch.min(b_1, b_2)
         b_max = torch.max(b_1, b_2)
 
@@ -139,18 +151,18 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             if round != 0:
                 max_spacing = (self.intervals[0][1] - self.intervals[0][0]) / (n_hyperplanes + 2)
                 self.model.layers[0].bias.data = torch.linspace(self.intervals[0][0] + max_spacing,
-                                                                self.intervals[0][1] - max_spacing, n_hyperplanes).double()
+                                                                self.intervals[0][1] - max_spacing, n_hyperplanes)
             else: 
                 max_spacing = (self.intervals[0][1] - self.intervals[0][0]) / n_hyperplanes
                 self.model.layers[0].bias.data = torch.linspace(self.intervals[0][0], 
-                                                                self.intervals[0][1], n_hyperplanes).double()
+                                                                self.intervals[0][1], n_hyperplanes)
         else:
 
             self.intervals.sort(key=lambda x: x[1] - x[0], reverse=True)
             mod_hp = n_hyperplanes % len(self.intervals)
             n_hp = n_hyperplanes // len(self.intervals)
             curr_idx = 0
-            bias_tensor = torch.zeros_like(self.model.layers[0].bias.data).double()
+            bias_tensor = torch.zeros_like(self.model.layers[0].bias.data)
             max_spacing = 0
             interval_idx = 0
 
@@ -186,6 +198,9 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
 
         self.model = self.model.to(self.device)
 
+        if self.double_precision:
+            self.model = self.model.double()
+
         if self.parallelize:
             self.model = nn.DataParallel(self.model)
 
@@ -203,7 +218,7 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         optimizer = torch.optim.SGD(self.model.parameters())
         if self.dataset_name == 'adult':
             criterion = nn.BCEWithLogitsLoss()
-        elif self.dataset_name in ['cifar10', 'cifar100', 'tiny-imagenet']:
+        elif self.dataset_name in ['cifar10', 'cifar100', 'tiny-imagenet', 'harus']:
             criterion = nn.CrossEntropyLoss()
         self.model.train()
 
@@ -213,6 +228,7 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
 
             pred = pred.squeeze()
             loss = criterion(pred, self.labels[i])
+
             loss.backward()
             dL_db_image = self.model.layers[0].bias.grad.data.detach().clone()
             dL_dA_image = self.model.layers[0].weight.grad.data.detach().clone()
@@ -379,8 +395,35 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         rec_inputs = self._reconstruct_samples(observations_list, coeffs_list)
 
         return rec_inputs
+
+
+    def _remove_multiple_reconstruction(self, paired_inputs):
+        """Remove duplicates of reconstruction of the same true image.
+        Args:
+            paired_inputs(list): List of tuples in the form (reconstructed_image, true_image, evaluation_metric)
+        Returns:
+            paired_inputs(list): List of paired inputs without duplicates"""
+        
+        cleaned_inputs = []
+        for x in self.inputs:
+            x = x.cpu()
+            to_compare = []
+            for i in paired_inputs:
+                if torch.equal(i[1], x):
+                    to_compare.append((i[0], i[2]))
+            if len(to_compare) == 1:
+                cleaned_inputs.append((to_compare[0][0], x, to_compare[0][1]))
+            elif len(to_compare) > 1:
+                to_compare.sort(key=lambda x: x[1])
+                if self.dataset_type != 'tabular':
+                    cleaned_inputs.append((to_compare[-1][0], x, to_compare[-1][1]))
+                else:
+                    cleaned_inputs.append((to_compare[0][0], x, to_compare[0][1]))
+        return cleaned_inputs
     
-    def _evaluate_attack(self, paired_inputs, dataset_name):
+
+    
+    def evaluate_attack(self, paired_inputs):
         """
         Evaluate the attack.
         """
@@ -388,35 +431,248 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         Args:
             paired_images(list): List of inputs.
             dataset_name(str): Name of the dataset.
-        Returns:
-            ssim_list(list): List of SSIM values.
-            avg_ssim(float): Average SSIM value.
-            psnr_list(list): List of PSNR values.
-            avg_psnr(float): Average PSNR value.
-
-            max_diff_list, avg_max_diff, l2_norm_diff_list
         """
-        if dataset_name == 'adult':
+
+        if len(paired_inputs) != self.inputs.shape[0]:
+            paired_inputs = self._remove_multiple_reconstruction(paired_inputs)
+        if self.dataset_type == 'tabular':
             norm_diff_list = [torch.norm(paired_inputs[i][0] - paired_inputs[i][1]).item() for i in range(len(paired_inputs))]
             diff_list = [paired_inputs[i][0] - paired_inputs[i][1] for i in range(len(paired_inputs))]
             avg_norm_diff = sum(norm_diff_list)/len(norm_diff_list)
             max_norm_diff = max(norm_diff_list)
-            max_diff = max([torch.max(diff_list[i]) for i in range(len(diff_list))])
-            return norm_diff_list, avg_norm_diff, max_norm_diff, max_diff
+            max_diff = max([torch.max(diff_list[i]).item() for i in range(len(diff_list))])
+
+            n_perfect_reconstructed = sum([norm_diff_list[i] < 0.1 for i in range(len(norm_diff_list))])
+            return norm_diff_list, avg_norm_diff, max_norm_diff, max_diff, n_perfect_reconstructed
         
         else:
-            ssim_list = [get_ssim(paired_inputs[i][0], paired_inputs[i][1], dataset_name) for i in range(len(paired_inputs))]
+            ssim_list = [get_ssim(paired_inputs[i][0], paired_inputs[i][1], self.dataset_name) for i in range(len(paired_inputs))]
             avg_ssim = sum(ssim_list)/len(ssim_list)
             psnr_list = [get_psnr(paired_inputs[i][0], paired_inputs[i][1], data_range=1) for i in range(len(paired_inputs))]
             avg_psnr = sum(psnr_list)/len(psnr_list)
+            n_perfect_reconstructed = sum([ssim_list[i] > 0.95 for i in range(len(ssim_list))])
 
-            return ssim_list, avg_ssim, psnr_list, avg_psnr
+            return ssim_list, avg_ssim, psnr_list, avg_psnr, n_perfect_reconstructed
         
+
+class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
+    """
+    Class implementing the Currious Abandon Honesty attack.
+    """
+    
+    def __init__(self, model, device, dataset_name, seed, double_precision, batch_size, data_dir, atol, rtol, parallelize=False):
+            super(CuriousAbandonHonestyAttack, self).__init__(
+                model=model, 
+                device=device,
+                dataset_name=dataset_name,
+                seed=seed,
+                double_precision=double_precision,
+                )
             
+            self.atol = atol
+            self.rtol = rtol
+            self.batch_size = batch_size
+            self.data_dir = data_dir
+            self.parallelize = parallelize
+            self.current_search_state = []
+            self.dataset_type = "image" if dataset_name in ['cifar10', 'cifar100', 'imagenet'] else "tabular"
 
 
+            self.inputs, self.labels, self.n_classes = self._get_dataset()
+
+            self.model.to(self.device)
+            if self.double_precision:
+                self.model = self.model.double()
+            if self.parallelize and device != 'cuda':
+                raise ValueError("Parallelization is only supported on GPUs. Please set the device to 'cuda'.")
+        
+            if self.parallelize and torch.cuda.device_count() <=1:
+                raise ValueError("Parallelization is only supported on multiple GPUs.")
+        
+            elif self.parallelize:
+                self.model = nn.DataParallel(self.model)
+            
+    def _get_dataset(self):
+        """
+        Get a random batch of samples from the dataset.
+        
+        Returns:
+            inputs(torch.Tensor): The inputs of the samples.
+            labels(torch.Tensor): The labels of the samples.
+            n_classes(int): The number of classes in the dataset.
+        """
+        inputs, labels, n_classes = prepare_data(double_precision=self.double_precision,
+                                                 dataset=self.dataset_name, data_dir=self.data_dir,
+                                                 n_samples=self.batch_size)
+        return inputs.to(self.device), labels.to(self.device), n_classes
+    
+
+    def execute_attack(self, sigma, mu, scale_factor, n_rounds=1):
+        """
+        Execute the Curious Abandon Honesty Attack.
+
+        1. Set the malicious model parameters
+        2. Simulate a communication round
+        3. Retrieve the observations
+        """
+
+        for _ in range(n_rounds):
+            self._set_malicious_model_params(sigma=sigma, mu=mu, scale_factor=scale_factor)
+
+            observations  = self._simulate_communication_round()
+
+            self.current_search_state.extend(observations)
+
+        observations_list = self._extract_observations()
+        return observations_list  
+    
+
+    def _set_malicious_model_params(self, sigma, mu, scale_factor):
+        """" Set the malicious model parameters"""
+        N, K = self.inputs.shape[1], self.model.layers[0].weight.shape[0]
+        indices = torch.zeros((K, N), dtype=torch.long)
+
+        for row in range(K):
+            indices[row] = torch.randperm(N)
+        negative_weight_indices = indices[:, : int(N / 2)]
+        positive_weight_indices = indices[:, int(N / 2) :]
+
+        if N % 2 != 0:
+            sampled_weights = torch.abs(torch.randn(K, int(math.ceil(N / 2))) * sigma) * -1
+
+            negative_samples = sampled_weights[:, :-1]
+        positive_samples = -scale_factor * sampled_weights
+
+        final_weights = torch.empty(K, N)
+        final_weights.scatter_(1, negative_weight_indices, negative_samples)
+        final_weights.scatter_(1, positive_weight_indices, positive_samples)
+        if self.double_precision:
+            final_weights = final_weights.double()
+        self.model.layers[0].weight = nn.Parameter(final_weights)
+
+        bias_tensor = torch.ones_like(self.model.layers[0].bias) * mu
+        if self.double_precision:
+            bias_tensor = bias_tensor.double()
+        self.model.layers[0].bias = nn.Parameter(bias_tensor)
+
+        self.model = self.model.to(self.device)
         
 
+    def _simulate_communication_round(self, debug=False):
+        """Simulate a communication round between the client and the server.
+        Returns the updates that the server can observe to reconstruct the images.
 
+        Args:
+            debug(bool): Whether to print debug information. Default is False.
+        Returns:
+            observations(torch.Tensor): The observations of the server.
+            sum_dL_db(torch.Tensor): The sum of the gradients of the loss with respect to the bias.
+        """
 
+        optimizer = torch.optim.SGD(self.model.parameters())
+        if self.dataset_name == 'adult':
+            criterion = nn.BCEWithLogitsLoss()
+        elif self.dataset_name in ['cifar10', 'cifar100', 'tiny-imagenet', 'harus']:
+            criterion = nn.CrossEntropyLoss()
+        self.model.train()
 
+        for i in range(self.inputs.shape[0]):
+            optimizer.zero_grad()
+            pred = self.model(self.inputs[i])
+
+            pred = pred.squeeze()
+            loss = criterion(pred, self.labels[i])
+            loss.backward()
+            dL_db_image = self.model.layers[0].bias.grad.data.detach().clone()
+            dL_dA_image = self.model.layers[0].weight.grad.data.detach().clone()
+
+            if i == 0:
+                dL_dA_all = dL_dA_image.unsqueeze(0)
+                dL_db_all = dL_db_image.unsqueeze(0)
+
+            else:
+                dL_dA_all = torch.cat((dL_dA_all, dL_dA_image.unsqueeze(0)), 0)
+                dL_db_all = torch.cat((dL_db_all, dL_db_image.unsqueeze(0)), 0)
+                
+        if debug:
+            logging.debug(f"b: {self.model.layers[0].bias.data}")
+            logging.debug(f"db: {dL_db_all}")
+            logging.debug(f"sum db: {torch.sum(dL_db_all, dim=0)}")
+            
+        sum_dL_dB = torch.sum(dL_db_all, dim=0).view(-1, 1)
+        obs_rec = torch.sum(dL_dA_all, dim=0)/sum_dL_dB
+
+        return obs_rec.cpu()
+    
+
+    def _is_similar(self, t1, t2):
+                return torch.allclose(t1, t2, atol=self.atol, rtol=self.rtol)
+    def _extract_observations(self):
+        """
+        Extract the observations from the search state.
+        """
+        cleaned_list = [self.current_search_state[i] for i in range(len(self.current_search_state)) if not torch.isnan(self.current_search_state[i]).any()]
+        
+        unique_obs = []
+        for obs in cleaned_list:
+            if not any(self._is_similar(obs, unique_tensor) for unique_tensor in unique_obs):
+                unique_obs.append(obs)
+        return unique_obs
+    
+    def _remove_multiple_reconstruction(self, paired_inputs):
+        """Remove duplicates of reconstruction of the same true image.
+        Args:
+            paired_inputs(list): List of tuples in the form (reconstructed_image, true_image, evaluation_metric)
+        Returns:
+            paired_inputs(list): List of paired inputs without duplicates"""
+        
+        cleaned_inputs = []
+        for x in self.inputs:
+            x = x.cpu()
+            to_compare = []
+            for i in paired_inputs:
+                if torch.equal(i[1], x):
+                    to_compare.append((i[0], i[2]))
+            if len(to_compare) == 1:
+                cleaned_inputs.append((to_compare[0][0], x, to_compare[0][1]))
+            elif len(to_compare) > 1:
+                to_compare.sort(key=lambda x: x[1])
+                if self.dataset_type != 'tabular':
+                    cleaned_inputs.append((to_compare[-1][0], x, to_compare[-1][1]))
+                else:
+                    cleaned_inputs.append((to_compare[0][0], x, to_compare[0][1]))
+        return cleaned_inputs
+
+            
+        
+    def evaluate_attack(self, paired_inputs):
+        """
+        Evaluate the attack.
+        """
+        """
+        Args:
+            paired_images(list): List of inputs.
+            dataset_name(str): Name of the dataset.
+        """
+
+        if len(paired_inputs) != self.inputs.shape[0]:
+            paired_inputs = self._remove_multiple_reconstruction(paired_inputs)
+
+        if self.dataset_type == 'tabular':
+            norm_diff_list = [torch.norm(paired_inputs[i][0] - paired_inputs[i][1]).item() for i in range(len(paired_inputs))]
+            diff_list = [paired_inputs[i][0] - paired_inputs[i][1] for i in range(len(paired_inputs))]
+            avg_norm_diff = sum(norm_diff_list)/len(norm_diff_list)
+            max_norm_diff = max(norm_diff_list)
+            max_diff = max([torch.max(diff_list[i]) for i in range(len(diff_list))]).item()
+
+            n_perfect_reconstructed = sum([norm_diff_list[i] < 0.1 for i in range(len(norm_diff_list))])
+            return norm_diff_list, avg_norm_diff, max_norm_diff, max_diff, n_perfect_reconstructed
+        
+        else:
+            ssim_list = [get_ssim(paired_inputs[i][0], paired_inputs[i][1], self.dataset_name) for i in range(len(paired_inputs))]
+            avg_ssim = sum(ssim_list)/len(ssim_list)
+            psnr_list = [get_psnr(paired_inputs[i][0], paired_inputs[i][1], data_range=1) for i in range(len(paired_inputs))]
+            avg_psnr = sum(psnr_list)/len(psnr_list)
+            n_perfect_reconstructed = sum([ssim_list[i] > 0.95 for i in range(len(ssim_list))])
+
+            return ssim_list, avg_ssim, psnr_list, avg_psnr, n_perfect_reconstructed
