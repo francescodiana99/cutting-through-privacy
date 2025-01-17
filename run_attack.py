@@ -300,14 +300,14 @@ def main():
             'avg_ssim': avg_ssim,
             'psnr_list': np.array(psnr_list).astype(np.double).tolist(),
             'avg_psnr': avg_psnr,
-            'n_perfect_reconstructed': n_perfect_reconstructed
+            'n_perfect_reconstructed': np.double(n_perfect_reconstructed)
         }
     else:
         result_dict = {
             'max_norm_diff': max_norm_diff,
             'avg_norm_diff': avg_norm_diff,
             'max_diff': max_diff,
-            'n_perfect_reconstructed': n_perfect_reconstructed,
+            'n_perfect_reconstructed': np.double(n_perfect_reconstructed),
             'l2_norm_diff_list': np.array(norm_diff_list).astype(np.double).tolist()
         }
     results_path = os.path.join(args.results_path, 'results.json')

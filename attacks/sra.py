@@ -452,7 +452,7 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             avg_ssim = sum(ssim_list)/len(ssim_list)
             psnr_list = [get_psnr(paired_inputs[i][0], paired_inputs[i][1], data_range=1) for i in range(len(paired_inputs))]
             avg_psnr = sum(psnr_list)/len(psnr_list)
-            n_perfect_reconstructed = sum([ssim_list[i] > 0.95 for i in range(len(ssim_list))])
+            n_perfect_reconstructed = sum([ssim_list[i] > 0.9 for i in range(len(ssim_list))])
 
             return ssim_list, avg_ssim, psnr_list, avg_psnr, n_perfect_reconstructed
         
@@ -673,6 +673,6 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
             avg_ssim = sum(ssim_list)/len(ssim_list)
             psnr_list = [get_psnr(paired_inputs[i][0], paired_inputs[i][1], data_range=1) for i in range(len(paired_inputs))]
             avg_psnr = sum(psnr_list)/len(psnr_list)
-            n_perfect_reconstructed = sum([ssim_list[i] > 0.95 for i in range(len(ssim_list))])
+            n_perfect_reconstructed = sum([ssim_list[i] > 0.9 for i in range(len(ssim_list))])
 
             return ssim_list, avg_ssim, psnr_list, avg_psnr, n_perfect_reconstructed
