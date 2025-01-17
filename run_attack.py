@@ -272,8 +272,7 @@ def main():
         restore_images([paired_inputs[0][0], paired_inputs[0][1].cpu()], device=args.device, display=True)
     
     if dataset_type != 'tabular':
-        ssim_list, avg_ssim, psnr_list, avg_psnr, n_perfect_reconstructed = sra_attack.evaluate_attack(paired_inputs,
-                                                                            dataset_name=args.dataset)
+        ssim_list, avg_ssim, psnr_list, avg_psnr, n_perfect_reconstructed = sra_attack.evaluate_attack(paired_inputs)
         logging.info("-----------Metrics-----------")
         logging.info(f"Number of samples: {len(paired_inputs)}")
         logging.info(f"Number of perfect reconstructions: {n_perfect_reconstructed}")

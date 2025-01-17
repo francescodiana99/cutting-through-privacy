@@ -218,7 +218,7 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         optimizer = torch.optim.SGD(self.model.parameters())
         if self.dataset_name == 'adult':
             criterion = nn.BCEWithLogitsLoss()
-        elif self.dataset_name in ['cifar10', 'cifar100', 'tiny-imagenet', 'harus']:
+        elif self.dataset_name in ['cifar10', 'cifar100', 'tiny-imagenet', 'harus', 'imagenet']:
             criterion = nn.CrossEntropyLoss()
         self.model.train()
 
@@ -572,7 +572,7 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
         optimizer = torch.optim.SGD(self.model.parameters())
         if self.dataset_name == 'adult':
             criterion = nn.BCEWithLogitsLoss()
-        elif self.dataset_name in ['cifar10', 'cifar100', 'tiny-imagenet', 'harus']:
+        elif self.dataset_name in ['cifar10', 'cifar100', 'tiny-imagenet', 'harus', 'imagenet']:
             criterion = nn.CrossEntropyLoss()
         self.model.train()
 
