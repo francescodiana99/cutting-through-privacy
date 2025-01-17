@@ -223,7 +223,7 @@ def get_psnr(input_1, input_2, data_range=1):
     return psnr_metric
 
 
-def couple_images(rec_inputs_list, true_inputs_list, dataset_name='cifar10'):
+def couple_inputs(rec_inputs_list, true_inputs_list, dataset_name='cifar10'):
     """
     Find the correspondencies between images, according to SSIM if data are images, otherwise according to the maximum norm difference."""
     couples = []
@@ -237,10 +237,10 @@ def couple_images(rec_inputs_list, true_inputs_list, dataset_name='cifar10'):
     else:
         for i in range(len(rec_inputs_list)):
             img_1 = rec_inputs_list[i]
-            max_diff_list = [torch.norm(img_1 - img_2).item() for img_2 in true_inputs_list]
-            max_diff = max(max_diff_list)
-            idx = max_diff_list.index(max_diff)
-            couples.append((rec_inputs_list[i], true_inputs_list[idx], max_diff))
+            diff_list = [torch.norm(img_1 - img_2).item() for img_2 in true_inputs_list]
+            min_diff = min(diff_list)
+            idx = diff_list.index(min_diff)
+            couples.append((rec_inputs_list[i], true_inputs_list[idx], min_diff))
     return couples
 
 

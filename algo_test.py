@@ -524,7 +524,7 @@ def test_one_direction_attack():
         # recon_image = (k + 1) * (obs - (sum(images_reconstructed)/ (k+1)))
         images_reconstructed.append(recon_image)
     
-    paired_images = couple_images(images_reconstructed, images_client)
+    paired_images = couple_inputs(images_reconstructed, images_client)
     for k in range(num_samples):
         ssim = get_ssim(paired_images[k][0], paired_images[k][1])
         print(f"SSIM for image {k}: {ssim}")
@@ -558,18 +558,18 @@ def test_parallel_attack():
 
 
     # args = parse_args()
-    dataset_name = 'imagenet'
-    num_samples = 100
-    images, all_labels, n_classes = prepare_data(double_precision=True, dataset=dataset_name,n_samples=num_samples, model_type='fc', data_dir='~/data/imagenet')
+    dataset_name = 'harus'
+    num_samples = 1000
+    images, all_labels, n_classes = prepare_data(double_precision=True, dataset=dataset_name,n_samples=num_samples, model_type='fc', data_dir='/home/fdiana/data/harus')
 
 
     sample = np.random.choice(range(images.shape[0]), size=num_samples, replace=False)
     images_client = images[sample]
     labels_client = all_labels[sample]
-    # strips_obs, dL_db_history, corr_idx = find_observations(images_client, labels_client, n_classes=n_classes, control_bias=1e13, hidden_layers=[100], 
-    #                   input_weights_scale=1e-9, classification_weight_scale=1e-3, device='cuda', epsilon=1e-12, obs_atol=1e-5, obs_rtol=1e-6)
-    strips_obs, dL_db_history, corr_idx = find_observations_cnn(images_client, labels_client, n_classes=n_classes, dataset_name=dataset_name, control_bias=1e12, n_neurons=1000, 
-                      weights_scale=1e-6, classification_weight_scale=1e-2, device='cuda', epsilon=1e-8, obs_atol=1e-5, obs_rtol=1e-6)
+    strips_obs, dL_db_history, corr_idx = find_observations(images_client, labels_client, n_classes=n_classes, control_bias=1e13, hidden_layers=[1000], 
+                      input_weights_scale=1e-10, classification_weight_scale=1e-4, device='cuda', epsilon=1e-16, obs_atol=1e-4, obs_rtol=1e-5)
+    # strips_obs, dL_db_history, corr_idx = find_observations_cnn(images_client, labels_client, n_classes=n_classes, dataset_name=dataset_name, control_bias=1e12, n_neurons=1000, 
+    #                   weights_scale=1e-6, classification_weight_scale=1e-2, device='cuda', epsilon=1e-8, obs_atol=1e-5, obs_rtol=1e-6)
     images_reconstructed = [strips_obs[0]]
     # restore_images([images_reconstructed[0], images_client[0]], device=args.device, display=True, title="Reconstructed image 0")
 
@@ -587,14 +587,14 @@ def test_parallel_attack():
         # recon_image = (k + 1) * (obs - (sum(images_reconstructed)/ (k+1)))
         images_reconstructed.append(recon_image)
 
-    if dataset_name != 'adult':
+    if dataset_name != 'adult' and dataset_name != 'harus':
         images_client = images_client.flatten(start_dim=1)
         # paired_images = couple_images(images_reconstructed, images_client)
         
         if len(images_reconstructed) == images_client.shape[0]:
             paired_images = [(images_reconstructed[i], images_client[corr_idx[i]]) for i in range(len(images_reconstructed))]
         else:
-            paired_images = couple_images(images_reconstructed, images_client, dataset_name=dataset_name)
+            paired_images = couple_inputs(images_reconstructed, images_client, dataset_name=dataset_name)
         count = 0
         for k in range(len(paired_images)):
             ssim = get_ssim(paired_images[k][0], paired_images[k][1], dataset_name=dataset_name)
@@ -615,12 +615,13 @@ def test_parallel_attack():
         print(f"Max norm difference: {max_norm_diff}")
         print(f"Min norm difference: {min_norm_diff}")
 
+        print('Number of perfect reconstruction: ', len([i for i in paired_samples if i[2] < 0.1]))
     abs_alphas = [abs(i) for i in alphas]
-    print(alphas)
-    print(f"10 smallest alphas: {sorted(abs_alphas)[:10]}")
-    print(f"10 largest alphas: {sorted(abs_alphas)[-10:]}")
+    # print(alphas)
+    # print(f"10 smallest alphas: {sorted(abs_alphas)[:10]}")
+    # print(f"10 largest alphas: {sorted(abs_alphas)[-10:]}")
 
-    print(sum(alphas))
+    # print(sum(alphas))
     
 
 def set_seeds(seed):

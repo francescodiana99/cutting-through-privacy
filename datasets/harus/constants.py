@@ -1,0 +1,1 @@
+URL = "https://archive.ics.uci.edu/static/public/240/human+activity+recognition+using+smartphones.zip"

@@ -528,8 +528,8 @@ def get_observations_no_batch(images, labels, model, display=False):
         dL_db_image = model.layers[0].bias.grad.data.detach().clone()
         dL_dA_image = model.layers[0].weight.grad.data.detach().clone()
 
-        if i == 4:
-            print(dL_db_image)
+        # if i == 4:
+        #     print(dL_db_image)
         # softmax = nn.Softmax(dim=0)
         # softmax_out = softmax(pred)
 
