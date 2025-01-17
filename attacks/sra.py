@@ -230,24 +230,26 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             loss = criterion(pred, self.labels[i])
 
             loss.backward()
-            dL_db_image = self.model.layers[0].bias.grad.data.detach().clone()
-            dL_dA_image = self.model.layers[0].weight.grad.data.detach().clone()
+            dL_db_input = self.model.layers[0].bias.grad.data.detach().clone()
+            dL_dA_input = self.model.layers[0].weight.grad.data.detach().clone()
 
             if i == 0:
-                dL_dA_all = dL_dA_image.unsqueeze(0)
-                dL_db_all = dL_db_image.unsqueeze(0)
+                # dL_dA_all = dL_dA_input.unsqueeze(0)
+                # dL_db_all = dL_db_input.unsqueeze(0)
+
+                sum_dL_dA = dL_dA_input
+                sum_dL_dB = dL_db_input
 
             else:
-                dL_dA_all = torch.cat((dL_dA_all, dL_dA_image.unsqueeze(0)), 0)
-                dL_db_all = torch.cat((dL_db_all, dL_db_image.unsqueeze(0)), 0)
+                sum_dL_dA += dL_dA_input
+                sum_dL_dB += dL_db_input
                 
         if debug:
             logging.debug(f"b: {self.model.layers[0].bias.data}")
-            logging.debug(f"db: {dL_db_all}")
-            logging.debug(f"sum db: {torch.sum(dL_db_all, dim=0)}")
+            # logging.debug(f"db: {dL_db_all}")
+            # logging.debug(f"sum db: {torch.sum(dL_db_all, dim=0)}")
             
-        sum_dL_dB = torch.sum(dL_db_all, dim=0).view(-1, 1)
-        obs_rec = torch.sum(dL_dA_all, dim=0)/sum_dL_dB
+        obs_rec = sum_dL_dA / sum_dL_dB.view(-1, 1)
 
         return obs_rec.cpu(), sum_dL_dB.cpu()
     
@@ -583,25 +585,23 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
             pred = pred.squeeze()
             loss = criterion(pred, self.labels[i])
             loss.backward()
-            dL_db_image = self.model.layers[0].bias.grad.data.detach().clone()
-            dL_dA_image = self.model.layers[0].weight.grad.data.detach().clone()
+            dL_db_input = self.model.layers[0].bias.grad.data.detach().clone()
+            dL_dA_input = self.model.layers[0].weight.grad.data.detach().clone()
 
             if i == 0:
-                dL_dA_all = dL_dA_image.unsqueeze(0)
-                dL_db_all = dL_db_image.unsqueeze(0)
+                sum_dL_dA = dL_dA_input
+                sum_dL_dB = dL_db_input
 
             else:
-                dL_dA_all = torch.cat((dL_dA_all, dL_dA_image.unsqueeze(0)), 0)
-                dL_db_all = torch.cat((dL_db_all, dL_db_image.unsqueeze(0)), 0)
+                sum_dL_dA += dL_dA_input
+                sum_dL_dB += dL_db_input
                 
         if debug:
             logging.debug(f"b: {self.model.layers[0].bias.data}")
-            logging.debug(f"db: {dL_db_all}")
-            logging.debug(f"sum db: {torch.sum(dL_db_all, dim=0)}")
+            # logging.debug(f"db: {dL_db_all}")
+            # logging.debug(f"sum db: {torch.sum(dL_db_all, dim=0)}")
             
-        sum_dL_dB = torch.sum(dL_db_all, dim=0).view(-1, 1)
-        obs_rec = torch.sum(dL_dA_all, dim=0)/sum_dL_dB
-
+        obs_rec = sum_dL_dA / sum_dL_dB.view(-1, 1)
         return obs_rec.cpu()
     
 
