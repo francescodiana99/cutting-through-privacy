@@ -277,6 +277,8 @@ def main():
             'max_diff': 0,
             'l2_norm_diff_list': []
         }
+        os.makedirs(args.results_path, exist_ok=True)
+        
     else:
         # it means we have all the images
         if len(rec_input) == sra_attack.inputs.shape[0] and args.attack_name == 'hsra':
