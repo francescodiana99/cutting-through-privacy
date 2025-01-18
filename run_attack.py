@@ -263,53 +263,68 @@ def main():
     inputs_list = [sra_attack.inputs[i].cpu() for i in range(sra_attack.inputs.shape[0])]
 
     logging.info("Reconstruction completed. Pairing samples with true images...")
-    # it means we have all the images
-    if len(rec_input) == sra_attack.inputs.shape[0] and args.attack_name == 'hsra':
-        paired_inputs = [(rec_input[i], sra_attack.inputs[sra_attack.inputs_idx[i]].cpu()) for i in range(len(rec_input))]
-    else:
-        paired_inputs = couple_inputs(rec_input, inputs_list, dataset_name=args.dataset)
-    if args.display:
-        restore_images([paired_inputs[0][0], paired_inputs[0][1].cpu()], device=args.device, display=True)
-    
-    if dataset_type != 'tabular':
-        ssim_list, avg_ssim, psnr_list, avg_psnr, n_perfect_reconstructed = sra_attack.evaluate_attack(paired_inputs)
-        logging.info("-----------Metrics-----------")
-        logging.info(f"Number of samples: {len(paired_inputs)}")
-        logging.info(f"Number of perfect reconstructions: {n_perfect_reconstructed}")
-        logging.info(f"Average SSIM: {avg_ssim}")
-        logging.info(f"Average PSNR: {avg_psnr}")
-        
-    else:
-        norm_diff_list, avg_norm_diff, max_norm_diff, max_diff, n_perfect_reconstructed = sra_attack.evaluate_attack(paired_inputs)
-        logging.info("-----------Metrics-----------")
-        logging.info(f"Number of samples: {len(paired_inputs)}")
-        logging.info(f"Number of perfect reconstructions: {n_perfect_reconstructed}")
-        logging.info(f"Max diff: {max_diff}")
-        logging.info(f"Max norm diff: {max_norm_diff}")
-        logging.info(f"Average  norm diff: {avg_norm_diff}")
 
-        
-    os.makedirs(args.results_path, exist_ok=True)
-    if args.save_reconstruction:
-        rec_images_path = os.path.join(args.results_path, 'reconstructed.pt')
-        torch.save(torch.stack(rec_input), rec_images_path)
-
-    if dataset_type != 'tabular':
+    if len(rec_input) == 0:
+        logging.info("No sample was reconstructed.")
         result_dict = {
-            'ssim_list': np.array(ssim_list).astype(np.double).tolist(),
-            'avg_ssim': avg_ssim,
-            'psnr_list': np.array(psnr_list).astype(np.double).tolist(),
-            'avg_psnr': avg_psnr,
-            'n_perfect_reconstructed': np.double(n_perfect_reconstructed)
+            'ssim_list': [],
+            'avg_ssim': 0,
+            'psnr_list': [],
+            'avg_psnr': 0,
+            'n_perfect_reconstructed': 0,
+            'max_norm_diff': 0,
+            'avg_norm_diff': 0,
+            'max_diff': 0,
+            'l2_norm_diff_list': []
         }
     else:
-        result_dict = {
-            'max_norm_diff': max_norm_diff,
-            'avg_norm_diff': avg_norm_diff,
-            'max_diff': max_diff,
-            'n_perfect_reconstructed': np.double(n_perfect_reconstructed),
-            'l2_norm_diff_list': np.array(norm_diff_list).astype(np.double).tolist()
-        }
+        # it means we have all the images
+        if len(rec_input) == sra_attack.inputs.shape[0] and args.attack_name == 'hsra':
+            paired_inputs = [(rec_input[i], sra_attack.inputs[sra_attack.inputs_idx[i]].cpu()) for i in range(len(rec_input))]
+        else:
+            paired_inputs = couple_inputs(rec_input, inputs_list, dataset_name=args.dataset)
+        if args.display:
+            restore_images([paired_inputs[0][0], paired_inputs[0][1].cpu()], device=args.device, display=True, dataset_name=args.dataset)
+        
+        if dataset_type != 'tabular':
+            ssim_list, avg_ssim, psnr_list, avg_psnr, n_perfect_reconstructed = sra_attack.evaluate_attack(paired_inputs)
+            logging.info("-----------Metrics-----------")
+            logging.info(f"Number of samples: {len(paired_inputs)}")
+            logging.info(f"Number of perfect reconstructions: {n_perfect_reconstructed}")
+            logging.info(f"Average SSIM: {avg_ssim}")
+            logging.info(f"Average PSNR: {avg_psnr}")
+            
+        else:
+            norm_diff_list, avg_norm_diff, max_norm_diff, max_diff, n_perfect_reconstructed = sra_attack.evaluate_attack(paired_inputs)
+            logging.info("-----------Metrics-----------")
+            logging.info(f"Number of samples: {len(paired_inputs)}")
+            logging.info(f"Number of perfect reconstructions: {n_perfect_reconstructed}")
+            logging.info(f"Max diff: {max_diff}")
+            logging.info(f"Max norm diff: {max_norm_diff}")
+            logging.info(f"Average  norm diff: {avg_norm_diff}")
+
+            
+        os.makedirs(args.results_path, exist_ok=True)
+        if args.save_reconstruction:
+            rec_images_path = os.path.join(args.results_path, 'reconstructed.pt')
+            torch.save(torch.stack(rec_input), rec_images_path)
+
+        if dataset_type != 'tabular':
+            result_dict = {
+                'ssim_list': np.array(ssim_list).astype(np.double).tolist(),
+                'avg_ssim': avg_ssim,
+                'psnr_list': np.array(psnr_list).astype(np.double).tolist(),
+                'avg_psnr': avg_psnr,
+                'n_perfect_reconstructed': np.double(n_perfect_reconstructed)
+            }
+        else:
+            result_dict = {
+                'max_norm_diff': max_norm_diff,
+                'avg_norm_diff': avg_norm_diff,
+                'max_diff': max_diff,
+                'n_perfect_reconstructed': np.double(n_perfect_reconstructed),
+                'l2_norm_diff_list': np.array(norm_diff_list).astype(np.double).tolist()
+            }
     results_path = os.path.join(args.results_path, 'results.json')
     
     if os.path.exists(results_path):

@@ -532,8 +532,8 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
     def _set_malicious_model_params(self, sigma, mu, scale_factor):
         """" Set the malicious model parameters"""
         N, K = self.inputs.shape[1], self.model.layers[0].weight.shape[0]
-        indices = torch.zeros((K, N), dtype=torch.long)
 
+        indices = torch.zeros((K, N), dtype=torch.long)
         for row in range(K):
             indices[row] = torch.randperm(N)
         negative_weight_indices = indices[:, : int(N / 2)]
@@ -544,7 +544,7 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
 
             negative_samples = sampled_weights[:, :-1]
         else:
-            
+
             sampled_weights = torch.abs(torch.randn(K, int(N / 2)) * sigma) * -1
             negative_samples = sampled_weights
         positive_samples = -scale_factor * sampled_weights
