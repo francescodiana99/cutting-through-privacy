@@ -1,4 +1,5 @@
 from collections import defaultdict
+import os
 import torch
 from torch import nn
 from utils_misc import prepare_data
@@ -14,18 +15,43 @@ class BaseSampleReconstructionAttack(ABC):
 
     Args:
         model(nn.Module): The model of the attacked client .
+        data_dir(str): Directory of the dataset.
+        n_classes(int): Number of classes in the dataset.
         device(str): Device on which to perform computations.
         dataset_name(str): The name of the datasets to use.
         seed(int): Seed for the fixing reproducibility.
         double_precision(bool): Whether to use double precision for the computations. Default is True.
     """
 
-    def __init__(self, model, device, dataset_name, seed=42, double_precision=True):
+    def __init__(self, model, data_dir, device, dataset_name, batch_size, n_classes, seed=42, double_precision=True):
         self.model = model
         self.device = device
         self.dataset_name = dataset_name
+        self.batch_size = batch_size
+        self.n_classes = n_classes
         self.seed = seed
         self.double_precision = double_precision
+        self.data_dir = data_dir
+        self.inputs, self.labels = self._get_data()
+
+    
+    def _get_data(self):
+        """
+        Load the first n_samples from the already prepared data sample.
+        """
+
+        data_path = os.path.join(self.data_dir, 'sample', f"{self.seed}")
+
+        if not os.path.exists(data_path):
+            raise FileNotFoundError("Data file does not exist. Please, indicate the sample to generate using flag '--generate_data'.")
+        
+        inputs = torch.load(os.path.join(data_path, 'inputs.pt'), weights_only=True)
+        labels = torch.load(os.path.join(data_path, 'labels.pt'), weights_only=True)
+
+        inputs = inputs[:self.batch_size]
+        labels = labels[:self.batch_size]
+
+        return inputs.to(self.device), labels.to(self.device)
 
     
     @abstractmethod
@@ -52,6 +78,7 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         model(nn.Module): The model of the attacked client .
         device(str): Device on which to perform computations.
         dataset_name(torch.utils.data.Dataset): The dataset of the attacked client.
+        n_classes(int): Number of classes in the dataset.
         seed(int): Seed for the fixing reproducibility.
         epsilon(float): Stopping condition for the search.
         atol(float): Absolute tolerance for checking if two observartions are equal.
@@ -60,24 +87,24 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         parallelize(bool): Whether to parallelize the model over multiple GPUs using DataParallel module. Defualt is False. 
     """
 
-    def __init__(self, model, dataset_name, device, seed, double_precision,
+    def __init__(self, model, dataset_name, n_classes, device, seed, double_precision,
                  epsilon, atol, rtol, batch_size, data_dir, parallelize=False):
 
         super(HyperplaneSampleReconstructionAttack, self).__init__(
             model=model, 
+            data_dir=data_dir,
             device=device,
             dataset_name=dataset_name,
             seed=seed,
+            n_classes=n_classes,
+            batch_size=batch_size,
             double_precision=double_precision,
             )
         self.epsilon = epsilon
         self.atol = atol
         self.rtol = rtol
-        self.batch_size = batch_size
-        self.data_dir = data_dir
         self.dataset_type = "image" if dataset_name in ['cifar10', 'cifar100', 'imagenet'] else "tabular"
 
-        self.inputs, self.labels, self.n_classes = self._get_dataset()
         self.model.to(self.device)
         self.parallelize = parallelize
 
@@ -98,19 +125,6 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
 
         self.current_search_state = []
 
-    def _get_dataset(self):
-        """
-        Get a random batch of samples from the dataset.
-        
-        Returns:
-            inputs(torch.Tensor): The inputs of the samples.
-            labels(torch.Tensor): The labels of the samples.
-            n_classes(int): The number of classes in the dataset.
-        """
-        inputs, labels, n_classes = prepare_data(double_precision=self.double_precision,
-                                                 dataset=self.dataset_name, data_dir=self.data_dir,
-                                                 n_samples=self.batch_size)
-        return inputs.to(self.device), labels.to(self.device), n_classes
     
     def _initialize_search_intervals(self):
         """
@@ -462,25 +476,23 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
     Class implementing the Currious Abandon Honesty attack.
     """
     
-    def __init__(self, model, device, dataset_name, seed, double_precision, batch_size, data_dir, atol, rtol, parallelize=False):
+    def __init__(self, model, device, dataset_name, n_classes, seed, double_precision, batch_size, data_dir, atol, rtol, parallelize=False):
             super(CuriousAbandonHonestyAttack, self).__init__(
                 model=model, 
+                data_dir=data_dir,
                 device=device,
                 dataset_name=dataset_name,
+                n_classes=n_classes,
                 seed=seed,
                 double_precision=double_precision,
+                batch_size=batch_size,
                 )
             
             self.atol = atol
             self.rtol = rtol
-            self.batch_size = batch_size
-            self.data_dir = data_dir
             self.parallelize = parallelize
             self.current_search_state = []
             self.dataset_type = "image" if dataset_name in ['cifar10', 'cifar100', 'imagenet'] else "tabular"
-
-
-            self.inputs, self.labels, self.n_classes = self._get_dataset()
 
             self.model.to(self.device)
             if self.double_precision:
@@ -493,20 +505,6 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
         
             elif self.parallelize:
                 self.model = nn.DataParallel(self.model)
-            
-    def _get_dataset(self):
-        """
-        Get a random batch of samples from the dataset.
-        
-        Returns:
-            inputs(torch.Tensor): The inputs of the samples.
-            labels(torch.Tensor): The labels of the samples.
-            n_classes(int): The number of classes in the dataset.
-        """
-        inputs, labels, n_classes = prepare_data(double_precision=self.double_precision,
-                                                 dataset=self.dataset_name, data_dir=self.data_dir,
-                                                 n_samples=self.batch_size)
-        return inputs.to(self.device), labels.to(self.device), n_classes
     
 
     def execute_attack(self, sigma, mu, scale_factor, n_rounds=1):
