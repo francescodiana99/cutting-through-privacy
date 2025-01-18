@@ -186,6 +186,11 @@ def parse_args():
                         type=float,
                         help="Scale factor for the CaH attack."
                         )   
+                        
+    
+    parser.add_argument("--generate_samples",
+                        type=int,
+                        help="Number of samples to generate for the attack.")
     
     
     
@@ -204,6 +209,22 @@ def main():
 
     n_classes = N_CLASSES[args.dataset]
     input_dim = INPUT_DIM[args.dataset]
+
+    if args.generate_samples is not None:
+        inputs, labels, _ = prepare_data(dataset=args.dataset, 
+                                                 data_dir=args.data_dir, 
+                                                 n_samples=args.generate_samples,
+                                                 double_precision=args.double_precision
+                                                 )
+    # save the generated samples
+        inputs_path = os.path.join(args.data_dir, 'sample', f"{args.seed}", 'inputs.pt')
+        labels_path = os.path.join(args.data_dir, 'sample', f"{args.seed}", 'labels.pt')
+
+        os.makedirs(os.path.join(args.data_dir, 'sample', f"{args.seed}"), exist_ok=True)
+        torch.save(inputs, inputs_path)
+        torch.save(labels, labels_path)
+        logging.info(f"Generated samples saved in {inputs_path} and {labels_path}.")
+    
 
     if args.attack_name == 'hsra':
         model = FCNet(
@@ -229,6 +250,7 @@ def main():
             rtol=args.rtol,
             double_precision=args.double_precision,
             batch_size=args.n_samples,
+            n_classes=n_classes,
             parallelize=False, 
         )
 
@@ -252,7 +274,8 @@ def main():
             double_precision=args.double_precision,
             atol=args.atol,
             rtol=args.rtol,
-            parallelize=False
+            parallelize=False, 
+            n_classes=n_classes,
         )
         rec_input = sra_attack.execute_attack(n_rounds=args.n_rounds, mu=args.mu, sigma=args.sigma, scale_factor=args.scale_factor)
 
@@ -278,7 +301,7 @@ def main():
             'l2_norm_diff_list': []
         }
         os.makedirs(args.results_path, exist_ok=True)
-        
+
     else:
         # it means we have all the images
         if len(rec_input) == sra_attack.inputs.shape[0] and args.attack_name == 'hsra':
