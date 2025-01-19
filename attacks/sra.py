@@ -526,7 +526,7 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
             self.current_search_state.extend(observations)
 
             self._clean_search_state()
-            logging.info(f"N. reconstruction: {len(self.current_search_state)}")
+            logging.info(f"N. isolated images: {len(self.current_search_state)}")
 
         observations_list = self._extract_observations()
         return observations_list  
@@ -536,13 +536,13 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
         """
         Remove observations that are not reconstructed inputs. 
         We use the L2 norm to determine if two observations are the same, to keep the same evaluation metric as
-        
+
         """
 
         new_search_state = []
         for obs in self.current_search_state:
             for i in range(self.inputs.shape[0]):
-                if torch.norm(obs - self.inputs[i]) < 0.1:
+                if torch.norm(obs - self.inputs[i].cpu()) < 0.1:
                     new_search_state.append(obs)
                     break
 
