@@ -1,3 +1,4 @@
+import json
 import logging
 import torch
 import torchvision
@@ -203,3 +204,31 @@ def configure_logging():
         handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
     root_logger.setLevel(logging.INFO)
 
+
+def save_results(data_path, result_dict, com_round, rec_inputs=None):
+    """
+    Save the results to a file.
+
+    Parameters:
+    - data_path (str): The path to the file where the results will be saved.
+    - result_dict (dict): The dictionary containing the results.
+    - com_round (int): The communication round  number.
+    - rec_inputs (torch.Tensor): Tensor containing the reconstructed input. Default is None.
+    """
+
+    os.makedirs(data_path, exist_ok=True)
+
+    file_path = os.path.join(data_path, f"results.json")
+
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as f:
+            results = json.load(f)
+        results[f"{com_round}"] = result_dict
+    else:
+        results = {f"{com_round}": result_dict}
+    with open(file_path, 'w') as f:
+        json.dump(results, f)
+    logging.info(f"Results saved in {file_path}.")
+
+    if rec_inputs is not None:
+        torch.save(rec_inputs, os.path.join(data_path, f"{com_round}.pt"))
