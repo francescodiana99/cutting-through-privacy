@@ -516,16 +516,42 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
         3. Retrieve the observations
         """
 
-        for _ in range(n_rounds):
+        for r in range(n_rounds):
+            logging.info("-------------------")
+            logging.info(f"Simulating round {r}")
             self._set_malicious_model_params(sigma=sigma, mu=mu, scale_factor=scale_factor)
 
             observations  = self._simulate_communication_round()
 
             self.current_search_state.extend(observations)
 
+            self._clean_search_state()
+            logging.info(f"N. reconstruction: {len(self.current_search_state)}")
+
         observations_list = self._extract_observations()
         return observations_list  
     
+
+    def _clean_search_state(self):
+        """
+        Remove observations that are not reconstructed inputs. 
+        We use the L2 norm to determine if two observations are the same, to keep the same evaluation metric as
+        
+        """
+
+        new_search_state = []
+        for obs in self.current_search_state:
+            for i in range(self.inputs.shape[0]):
+                if torch.norm(obs - self.inputs[i]) < 0.1:
+                    new_search_state.append(obs)
+                    break
+
+        # remove duplicates
+        cleaned_list = list(set(new_search_state))
+
+        self.current_search_state = cleaned_list
+        
+            
 
     def _set_malicious_model_params(self, sigma, mu, scale_factor):
         """" Set the malicious model parameters"""
@@ -614,7 +640,7 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
         Extract the observations from the search state.
         """
         cleaned_list = [self.current_search_state[i] for i in range(len(self.current_search_state)) if not torch.isnan(self.current_search_state[i]).any()]
-        
+
         unique_obs = []
         for obs in cleaned_list:
             if not any(self._is_similar(obs, unique_tensor) for unique_tensor in unique_obs):
