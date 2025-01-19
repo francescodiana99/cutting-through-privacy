@@ -56,14 +56,10 @@ def parse_args():
                         help="Number of samples to use for the search."
                         )
     
-    parser.add_argument("--n_rounds",
+    parser.add_argument("--eval_rounds",
+                        nargs='+',
                         type=int,
-                        help="Number of rounds for the search."
-                        )
-    
-    parser.add_argument("--eval_freq",
-                        type=int,
-                        help="Evaluation frequency for the attack.")
+                        help="Evaluation rounds for the attack.")
     
     parser.add_argument("--device",
                         type=str,
@@ -192,6 +188,18 @@ def parse_args():
                         type=int,
                         help="Number of samples to generate for the attack.")
     
+    parser.add_argument("--learning_rate",
+                        type=float,
+                        default=1e-3,
+                        help="Learning rate for the attack."
+                        )
+    
+    parser.add_argument("--n_local_steps",
+                        type=int,
+                        default=100,
+                        help="Number of local training steps ."
+    )
+    
     
     
     return parser.parse_args()
@@ -209,6 +217,9 @@ def main():
 
     n_classes = N_CLASSES[args.dataset]
     input_dim = INPUT_DIM[args.dataset]
+
+    eval_rounds = args.eval_rounds
+    eval_rounds.sort()
 
     if args.generate_samples is not None:
         inputs, labels, _ = prepare_data(dataset=args.dataset, 
@@ -252,9 +263,21 @@ def main():
             batch_size=args.n_samples,
             n_classes=n_classes,
             parallelize=False, 
+            learning_rate=args.learning_rate,
+            n_local_steps=args.n_local_steps,
         )
+        for r in  eval_rounds:
+            rec_input = sra_attack.execute_attack(debug=args.debug, eval_round=r)
+            logging.info(f"Starting evaluation for round {r}...")
+            result_dict = sra_attack.evaluate_attack(rec_input)
 
-        rec_input = sra_attack.execute_attack(debug=args.debug, n_rounds=args.n_rounds)
+            if args.save_reconstruction:
+                save_results(args.results_path, result_dict, r, rec_input)
+            else:
+                save_results(args.results_path, result_dict, r)
+            
+            logging.info(f"Results for round {r} saved in {args.results_path}.")
+
 
     
     elif args.attack_name == 'cah':
@@ -276,93 +299,24 @@ def main():
             rtol=args.rtol,
             parallelize=False, 
             n_classes=n_classes,
+            learning_rate=args.learning_rate,
+            n_local_steps=args.n_local_steps,
         )
-        rec_input = sra_attack.execute_attack(n_rounds=args.n_rounds, mu=args.mu, sigma=args.sigma, scale_factor=args.scale_factor)
+        for r in eval_rounds:
+            # TODO refactor evaluate attack
+            rec_input = sra_attack.execute_attack(eval_round=r, mu=args.mu, sigma=args.sigma, scale_factor=args.scale_factor)
+            logging.info(f"Starting evaluation for round {r}...")
+            result_dict = sra_attack.evaluate_attack(rec_input)
+
+            if args.save_reconstruction:
+                save_results(args.results_path, result_dict, r, rec_input)
+            else:
+                save_results(args.results_path, result_dict, r)
+            
+            logging.info(f"Results for round {r} saved in {args.results_path}.")
 
     else:
         raise ValueError(f"Attack name {args.attack_name} is not supported.")
-
-
-    inputs_list = [sra_attack.inputs[i].cpu() for i in range(sra_attack.inputs.shape[0])]
-
-    logging.info("Reconstruction completed. Pairing samples with true images...")
-
-    if len(rec_input) == 0:
-        logging.info("No sample was reconstructed.")
-        result_dict = {
-            'ssim_list': [],
-            'avg_ssim': 0,
-            'psnr_list': [],
-            'avg_psnr': 0,
-            'n_perfect_reconstructed': 0,
-            'max_norm_diff': 0,
-            'avg_norm_diff': 0,
-            'max_diff': 0,
-            'l2_norm_diff_list': []
-        }
-        os.makedirs(args.results_path, exist_ok=True)
-
-    else:
-        # it means we have all the images
-        if len(rec_input) == sra_attack.inputs.shape[0] and args.attack_name == 'hsra':
-            paired_inputs = [(rec_input[i], sra_attack.inputs[sra_attack.inputs_idx[i]].cpu()) for i in range(len(rec_input))]
-        else:
-            paired_inputs = couple_inputs(rec_input, inputs_list, dataset_name=args.dataset)
-        if args.display:
-            restore_images([paired_inputs[0][0], paired_inputs[0][1].cpu()], device=args.device, display=True, dataset_name=args.dataset)
-        
-        if dataset_type != 'tabular':
-            ssim_list, avg_ssim, psnr_list, avg_psnr, n_perfect_reconstructed = sra_attack.evaluate_attack(paired_inputs)
-            logging.info("-----------Metrics-----------")
-            logging.info(f"Number of samples: {len(paired_inputs)}")
-            logging.info(f"Number of perfect reconstructions: {n_perfect_reconstructed}")
-            logging.info(f"Average SSIM: {avg_ssim}")
-            logging.info(f"Average PSNR: {avg_psnr}")
-            
-        else:
-            norm_diff_list, avg_norm_diff, max_norm_diff, max_diff, n_perfect_reconstructed = sra_attack.evaluate_attack(paired_inputs)
-            logging.info("-----------Metrics-----------")
-            logging.info(f"Number of samples: {len(paired_inputs)}")
-            logging.info(f"Number of perfect reconstructions: {n_perfect_reconstructed}")
-            logging.info(f"Max diff: {max_diff}")
-            logging.info(f"Max norm diff: {max_norm_diff}")
-            logging.info(f"Average  norm diff: {avg_norm_diff}")
-
-            
-        os.makedirs(args.results_path, exist_ok=True)
-        if args.save_reconstruction:
-            rec_images_path = os.path.join(args.results_path, 'reconstructed.pt')
-            torch.save(torch.stack(rec_input), rec_images_path)
-
-        if dataset_type != 'tabular':
-            result_dict = {
-                'ssim_list': np.array(ssim_list).astype(np.double).tolist(),
-                'avg_ssim': avg_ssim,
-                'psnr_list': np.array(psnr_list).astype(np.double).tolist(),
-                'avg_psnr': avg_psnr,
-                'n_perfect_reconstructed': np.double(n_perfect_reconstructed)
-            }
-        else:
-            result_dict = {
-                'max_norm_diff': max_norm_diff,
-                'avg_norm_diff': avg_norm_diff,
-                'max_diff': max_diff,
-                'n_perfect_reconstructed': np.double(n_perfect_reconstructed),
-                'l2_norm_diff_list': np.array(norm_diff_list).astype(np.double).tolist()
-            }
-    results_path = os.path.join(args.results_path, 'results.json')
     
-    if os.path.exists(results_path):
-        with open(results_path, 'r') as f:
-            results = json.load(f)
-        results[f"{args.n_rounds}"] = result_dict
-    else:
-        results = {f"{args.n_rounds}": result_dict}
-    with open(results_path, 'w') as f:
-        json.dump(results, f)
-    logging.info(f"Results saved in {results_path}.")
-
-    
-
 if __name__ == '__main__':
     main()
