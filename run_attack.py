@@ -194,10 +194,10 @@ def parse_args():
                         help="Learning rate for the attack."
                         )
     
-    parser.add_argument("--n_local_steps",
+    parser.add_argument("--n_local_epochs",
                         type=int,
                         default=100,
-                        help="Number of local training steps ."
+                        help="Number of local training epochs ."
     )
     
     
@@ -264,7 +264,7 @@ def main():
             n_classes=n_classes,
             parallelize=False, 
             learning_rate=args.learning_rate,
-            n_local_steps=args.n_local_steps,
+            n_local_epochs=args.n_local_epochs,
         )
         for r in  eval_rounds:
             rec_input = sra_attack.execute_attack(debug=args.debug, eval_round=r)
@@ -300,7 +300,7 @@ def main():
             parallelize=False, 
             n_classes=n_classes,
             learning_rate=args.learning_rate,
-            n_local_steps=args.n_local_steps,
+            n_local_epochs=args.n_local_epochs,
         )
         for r in eval_rounds:
             # TODO refactor evaluate attack
