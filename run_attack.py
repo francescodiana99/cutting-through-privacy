@@ -303,7 +303,6 @@ def main():
             n_local_epochs=args.n_local_epochs,
         )
         for r in eval_rounds:
-            # TODO refactor evaluate attack
             rec_input = sra_attack.execute_attack(eval_round=r, mu=args.mu, sigma=args.sigma, scale_factor=args.scale_factor)
             logging.info(f"Starting evaluation for round {r}...")
             result_dict = sra_attack.evaluate_attack(rec_input)

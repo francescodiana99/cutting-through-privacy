@@ -197,7 +197,6 @@ def configure_logging():
     """
     Set up logging based on verbosity level
     """
-    # TODO: this should be fixed. Opacus changes the default level to WARNING
     logging.basicConfig(level=logging.INFO)
     root_logger = logging.getLogger()
     for handler in root_logger.handlers:

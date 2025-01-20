@@ -4,7 +4,7 @@ import torch
 class FCNet(nn.Module):
     """
     Fully connected neural network with ReLU activation functions."""
-    def __init__(self, input_dimension=1, output_dimension=1, classification_weight_scale=1, hidden_layers=[1], initialization='equal', classification_bias=None,
+    def __init__(self, input_dimension=1, output_dimension=1, classification_weight_scale=1, hidden_layers=[1], initialization='normal', classification_bias=None,
                  input_weights_scale=1, hidden_weights_scale=1e-3, hidden_bias_scale=1e-3, honest=False):
         """
         Args:
@@ -12,7 +12,7 @@ class FCNet(nn.Module):
             output_dimension(int): Dimension of the output.
             hidden_layers(list): List of integers representing the number of neurons in each hidden layer. Deafult is [1].
             weight_scale(float): Scale of the weight of the first hidden layer of the network.
-            initialization(str): Initialization method for the weights. Possible values are 'uniform', 'equal' and 'None'. Default is 'equal'.
+            initialization(str): Initialization method for the weights. Possible values are 'uniform', 'normal' and 'None'. Default is 'normal'.
             classification_bias(float): Bias magnitude for the classification layer. Default is None.
             input_weights_scale(float): Scale of the weights of the input layer. Default is 1.
             hidden_weights_scale(float): Scale of the weights of the hidden layers. Default is 1e-3.
@@ -74,7 +74,7 @@ class FCNet(nn.Module):
             x = layer(x)
         return x
     
-
+    # TODO: fix, use uniform distribution for initialization
     def _initialize_att_weights(self, initialization):
         """
         Initialize the weights of the the first layer in the network.
@@ -82,8 +82,11 @@ class FCNet(nn.Module):
             initialization(str): Initialization method for the weights. Possible values are 'uniform', equal and 'None'. Default is 'equal'.
         """
         if initialization == 'uniform':
-            return nn.init.uniform_(self.hidden_layers[0].weight, 0, 1 * self.self.input_weights_scale)
-        elif initialization == 'equal':
+            # nn.init.uniform_(self.hidden_layers[0].weight, 0, 1 * self.self.input_weights_scale)
+            random_tensor = torch.rand(1, self.layers[0].weight.shape[1]) 
+            self.layers[0].weight.data = random_tensor.repeat(self.layers[0].weight.shape[0], 1) * self.input_weights_scale
+
+        elif initialization == 'normal':
             random_tensor = torch.randn(1, self.layers[0].weight.shape[1])
             self.layers[0].weight.data = random_tensor.repeat(self.layers[0].weight.shape[0], 1) * self.input_weights_scale
              
