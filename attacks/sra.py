@@ -280,14 +280,29 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         b_tensor = - torch.matmul(self.model.layers[0].weight[0], torch.transpose(self.inputs, 0, 1)).cpu().detach()
         b_sorted, indices = torch.sort(torch.tensor(b_tensor.clone().detach()), dim=0)
         sorted_indices = torch.argsort(b_tensor, dim=0)
-        if self.double_precision:
-            b_1 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), torch.ones(self.inputs.shape[1]).double()).detach()
-            b_2 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), (torch.ones(self.inputs.shape[1]).double() * -1)).detach()
+        if self.dataset_type == 'tabular':
+            b_1 = torch.where(self.model.layers[0].weight[0].cpu() > 0, -1., 1.)
+            b_2 = torch.where(self.model.layers[0].weight[0].cpu() > 0, 1., -1.)
         else:
-            b_1 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), torch.ones(self.inputs.shape[1])).detach()
-            b_2 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), (torch.ones(self.inputs.shape[1]) * -1)).detach()
-        b_min = torch.min(b_1, b_2)
-        b_max = torch.max(b_1, b_2)
+            b_1 = torch.where(self.model.layers[0].weight[0].cpu() > 0, 0., 1.)
+            b_2 = torch.where(self.model.layers[0].weight[0].cpu() > 0, 1., 0.) 
+        
+        if self.double_precision:
+            b_min = torch.matmul(self.model.layers[0].weight[0].cpu(), b_1.double()).detach().clone()
+            b_max = torch.matmul(self.model.layers[0].weight[0].cpu(), b_2.double()).detach().clone()
+        else:
+            b_min = torch.matmul(self.model.layers[0].weight[0].cpu(), b_1).detach().clone()
+            b_max = torch.matmul(self.model.layers[0].weight[0].cpu(), b_2).detach().clone()
+            
+        # if self.double_precision:
+        #     b_1 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), torch.ones(self.inputs.shape[1]).double()).detach()
+        #     b_2 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), (torch.ones(self.inputs.shape[1]).double() * -1)).detach()
+        # else:
+        #     b_1 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), torch.ones(self.inputs.shape[1])).detach()
+        #     b_2 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), (torch.ones(self.inputs.shape[1]) * -1)).detach()
+        # b_min = torch.min(b_1, b_2)
+        # b_max = torch.max(b_1, b_2)
+
 
         intervals = [(b_min, b_max)] 
         spacing = (b_max - b_min)/ n_hyperplanes
