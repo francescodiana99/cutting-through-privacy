@@ -199,6 +199,11 @@ def parse_args():
                         default=100,
                         help="Number of local training epochs ."
     )
+
+    parser.add_argument("--use_batch_computation",
+                        action='store_true',
+                        help="Flag to use batch computation.",
+                        default=False)
     
     
     
@@ -247,7 +252,7 @@ def main():
             input_weights_scale=args.input_weights_scale, 
             hidden_weights_scale=args.hidden_weights_scale, 
             hidden_bias_scale=args.hidden_bias_scale,
-            honest=False
+            honest=False,
             )
 
         sra_attack = HyperplaneSampleReconstructionAttack(
@@ -265,6 +270,7 @@ def main():
             parallelize=False, 
             learning_rate=args.learning_rate,
             n_local_epochs=args.n_local_epochs,
+            batch_computation=args.use_batch_computation
         )
         for r in  eval_rounds:
             rec_input = sra_attack.execute_attack(debug=args.debug, eval_round=r)
@@ -301,6 +307,7 @@ def main():
             n_classes=n_classes,
             learning_rate=args.learning_rate,
             n_local_epochs=args.n_local_epochs,
+            batch_computation=args.use_batch_computation
         )
         for r in eval_rounds:
             rec_input = sra_attack.execute_attack(eval_round=r, mu=args.mu, sigma=args.sigma, scale_factor=args.scale_factor)

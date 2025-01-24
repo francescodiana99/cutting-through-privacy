@@ -25,9 +25,11 @@ class BaseSampleReconstructionAttack(ABC):
         learning_rate(float): Learning rate for the optimizer.
         seed(int): Seed for the fixing reproducibility.
         double_precision(bool): Whether to use double precision for the computations. Default is True.
+        batch_computation(bool): Whether to use batch or single sample computation. Default is False.
     """
 
-    def __init__(self, model, data_dir, device, dataset_name, batch_size, n_classes, n_local_epochs=1, learning_rate=1e-3, seed=42, double_precision=True):
+    def __init__(self, model, data_dir, device, dataset_name, batch_size, n_classes, 
+                 n_local_epochs=1, learning_rate=1e-3, seed=42, double_precision=True, batch_computation=False):
         self.model = model
         self.device = device
         self.dataset_name = dataset_name
@@ -39,6 +41,7 @@ class BaseSampleReconstructionAttack(ABC):
         self.n_local_epochs = n_local_epochs
         self.inputs, self.labels = self._get_data()
         self.learning_rate = learning_rate
+        self.batch_computation =  batch_computation
 
     
     def _get_data(self):
@@ -81,6 +84,7 @@ class BaseSampleReconstructionAttack(ABC):
 
         Args:
             debug(bool): Whether to print debug information. Default is False.
+            batch_computation(bool): Whether to use batch or single sample computation. Default is False
         Returns:
             observations(torch.Tensor): The observations of the server.
             sum_dL_db(torch.Tensor): The sum of the gradients of the loss with respect to the bias.
@@ -94,18 +98,22 @@ class BaseSampleReconstructionAttack(ABC):
         self.model.train()
         for e in range(self.n_local_epochs):
             optimizer.zero_grad()
-            for i in range(self.inputs.shape[0]):
-                pred = self.model(self.inputs[i])
+            if not self.batch_computation:
+                for i in range(self.inputs.shape[0]):
+                    pred = self.model(self.inputs[i])
 
-                pred = pred.squeeze()
-                loss = criterion(pred, self.labels[i])
+                    pred = pred.squeeze()
+                    loss = criterion(pred, self.labels[i])
 
-                if debug:
-                    logging.info(f"b: {self.model.layers[0].bias.data}")
-                    # logging.debug(f"db: {dL_db_all}")
-                    # logging.debug(f"sum db: {torch.sum(dL_db_all, dim=0)}")
-
-
+                    if debug:
+                        logging.info(f"b: {self.model.layers[0].bias.data}")
+                        # logging.debug(f"db: {dL_db_all}")
+                        # logging.debug(f"sum db: {torch.sum(dL_db_all, dim=0)}")
+                    loss.backward()
+            
+            else:
+                pred = self.model(self.inputs)
+                loss = criterion(pred, self.labels)
                 loss.backward()
             optimizer.step()
             dL_db_input = self.model.layers[0].bias.grad.data.detach().clone()
@@ -225,10 +233,14 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         rtol(float): Relative tolerance for checking if two observartions are equal.
         batch_size(int): Batch size for a client update step.
         parallelize(bool): Whether to parallelize the model over multiple GPUs using DataParallel module. Defualt is False. 
+        data_dir(str): Directory of the dataset.
+        n_local_epochs(int): Number of local training epochs. Default is 1.
+        learning_rate(float): Learning rate for the optimizer. Default is 1e-3.
+        batch_computation(bool): Whether to use batch or single sample computation. Default is False.
     """
 
     def __init__(self, model, dataset_name, n_classes, device, seed, double_precision,
-                 epsilon, atol, rtol, batch_size, data_dir, n_local_epochs=1, learning_rate=1e-3,parallelize=False):
+                 epsilon, atol, rtol, batch_size, data_dir, n_local_epochs=1, learning_rate=1e-3,parallelize=False, batch_computation=False):
 
         super(HyperplaneSampleReconstructionAttack, self).__init__(
             model=model, 
@@ -240,7 +252,8 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             batch_size=batch_size,
             double_precision=double_precision,
             n_local_epochs=n_local_epochs, 
-            learning_rate=learning_rate
+            learning_rate=learning_rate,
+            batch_computation=batch_computation
             )
         self.epsilon = epsilon
         self.atol = atol
@@ -375,7 +388,7 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         if self.parallelize:
             self.model = nn.DataParallel(self.model)
 
-    
+    # TODO: this method can be optimized by updating at the same time the intervals and the search state
     def _update_search_intervals(self):
         """
         Update the search intervals and search state, based on the current observations.
@@ -566,7 +579,8 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
     Class implementing the Currious Abandon Honesty attack.
     """
     
-    def __init__(self, model, device, dataset_name, n_classes, seed, double_precision, batch_size, data_dir, atol, rtol, learning_rate=1e-3, n_local_epochs=1, parallelize=False):
+    def __init__(self, model, device, dataset_name, n_classes, seed, double_precision, batch_size, data_dir, atol, rtol, learning_rate=1e-3,
+                  n_local_epochs=1, parallelize=False, batch_computation=False):
             super(CuriousAbandonHonestyAttack, self).__init__(
                 model=model, 
                 data_dir=data_dir,
@@ -577,7 +591,8 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
                 double_precision=double_precision,
                 batch_size=batch_size,
                 n_local_epochs=n_local_epochs,
-                learning_rate=learning_rate
+                learning_rate=learning_rate,
+                batch_computation=batch_computation
                 )
             
             self.atol = atol
