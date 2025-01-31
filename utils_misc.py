@@ -103,10 +103,10 @@ def prepare_data(double_precision=False, dataset='cifar10', data_dir='./data/', 
         
         if double_precision:
             features_tensor = torch.tensor(adult_set.features, dtype=torch.double)
-            labels_tensor = torch.tensor(adult_set.targets, dtype=torch.double)
+            labels_tensor = torch.tensor(adult_set.targets, dtype=torch.long)
         else:
             features_tensor = torch.tensor(adult_set.features, dtype=torch.float)
-            labels_tensor = torch.tensor(adult_set.targets, dtype=torch.float)
+            labels_tensor = torch.tensor(adult_set.targets, dtype=torch.long)
 
         sample_idx = torch.randperm(len(labels_tensor), generator=rnd_g)[:n_samples]
 
@@ -127,7 +127,7 @@ def prepare_data(double_precision=False, dataset='cifar10', data_dir='./data/', 
             labels_tensor = torch.tensor(harus_set.get_targets(), dtype=torch.long)
         else:
             features_tensor = torch.tensor(harus_set.get_features(), dtype=torch.float)
-            labels_tensor = torch.tensor(harus_set.get_targets(), dtype=torch.int)
+            labels_tensor = torch.tensor(harus_set.get_targets(), dtype=torch.long)
 
         sample_idx = torch.randperm(len(labels_tensor), generator=rnd_g)[:n_samples]
 
