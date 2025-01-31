@@ -52,13 +52,19 @@ class BaseSampleReconstructionAttack(ABC):
         data_path = os.path.join(self.data_dir, 'sample', f"{self.seed}")
 
         if not os.path.exists(data_path):
-            raise FileNotFoundError("Data file does not exist. Please, indicate the sample to generate using flag '--generate_data'.")
+            raise FileNotFoundError(f"Data  not found in {data_path}. \
+                                     Please, indicate the sample to generate using flag '--generate_data'.")
         
         inputs = torch.load(os.path.join(data_path, 'inputs.pt'), weights_only=True)
         labels = torch.load(os.path.join(data_path, 'labels.pt'), weights_only=True)
 
-        inputs = inputs[:self.batch_size]
-        labels = labels[:self.batch_size]
+        if self.double_precision:
+            inputs = inputs[:self.batch_size].double()
+            labels = labels[:self.batch_size].double()
+
+        else:
+            inputs = inputs[:self.batch_size].float()
+            labels = labels[:self.batch_size].float()
 
         return inputs.to(self.device), labels.to(self.device)
 
