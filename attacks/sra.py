@@ -60,11 +60,11 @@ class BaseSampleReconstructionAttack(ABC):
 
         if self.double_precision:
             inputs = inputs[:self.batch_size].double()
-            labels = labels[:self.batch_size].double()
+            labels = labels[:self.batch_size].long()
 
         else:
             inputs = inputs[:self.batch_size].float()
-            labels = labels[:self.batch_size].float()
+            labels = labels[:self.batch_size].int()
 
         return inputs.to(self.device), labels.to(self.device)
 
