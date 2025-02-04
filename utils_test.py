@@ -223,25 +223,58 @@ def get_psnr(input_1, input_2, data_range=1):
     return psnr_metric
 
 
-def couple_inputs(rec_inputs_list, true_inputs_list, dataset_name='cifar10'):
+# def couple_inputs(rec_inputs_list, true_inputs_list, dataset_name='cifar10'):
+#     """
+#     Find the correspondencies between images, according to SSIM if data are images, otherwise according to the maximum norm difference."""
+#     couples = []
+#     if dataset_name in ['cifar10', 'cifar100', 'tiny-imagenet', 'imagenet']:
+#         for i in range(len(rec_inputs_list)):
+#             img_1 = rec_inputs_list[i]
+#             ssim_list = [get_ssim(img_1, img_2, dataset_name) for img_2 in true_inputs_list]
+#             max_ssim = max(ssim_list)
+#             idx = ssim_list.index(max_ssim)
+#             couples.append((rec_inputs_list[i], true_inputs_list[idx], max_ssim))
+#     else:
+#         for i in range(len(rec_inputs_list)):
+#             img_1 = rec_inputs_list[i]
+#             diff_list = [torch.norm(img_1 - img_2).item() for img_2 in true_inputs_list]
+#             min_diff = min(diff_list)
+#             idx = diff_list.index(min_diff)
+#             couples.append((rec_inputs_list[i], true_inputs_list[idx], min_diff))
+#     return couples
+
+
+def couple_inputs(rec_inputs_list, true_inputs_list, dataset_name='cifar10', device='cuda'):
     """
     Find the correspondencies between images, according to SSIM if data are images, otherwise according to the maximum norm difference."""
+
+    rec_inputs = torch.stack(rec_inputs_list)
+    true_inputs = torch.stack(true_inputs_list)
+
+    N = rec_inputs.shape[0]
+    # M = true_inputs.shape[0]
+
     couples = []
-    if dataset_name in ['cifar10', 'cifar100', 'tiny-imagenet', 'imagenet']:
-        for i in range(len(rec_inputs_list)):
-            img_1 = rec_inputs_list[i]
-            ssim_list = [get_ssim(img_1, img_2, dataset_name) for img_2 in true_inputs_list]
-            max_ssim = max(ssim_list)
-            idx = ssim_list.index(max_ssim)
-            couples.append((rec_inputs_list[i], true_inputs_list[idx], max_ssim))
-    else:
-        for i in range(len(rec_inputs_list)):
-            img_1 = rec_inputs_list[i]
-            diff_list = [torch.norm(img_1 - img_2).item() for img_2 in true_inputs_list]
-            min_diff = min(diff_list)
-            idx = diff_list.index(min_diff)
-            couples.append((rec_inputs_list[i], true_inputs_list[idx], min_diff))
+    batch_size = 10
+    for i in range(0, N, 10):
+        if i + batch_size > N:
+            batch_size = N - i
+        batch = rec_inputs[i:i + batch_size]
+        
+
+        diff = batch.unsqueeze(1) - true_inputs.unsqueeze(0)  # Shape: [batch_size, M, D]
+        norm_diff = torch.norm(diff, dim=2)  # Shape: [batch_size, M]
+
+        # Find the best match for each recovered image in the batch
+        min_diff, idxs = torch.min(norm_diff, dim=1)  # min_diff: [batch_size], idxs: [batch_size]\
+
+        # Append results to the final list
+        for j in range(batch.shape[0]):
+            couples.append((rec_inputs_list[i + j], true_inputs_list[idxs[j]], min_diff[j].item()))
+    
     return couples
+
+        
 
 
 def max_norm_difference(tensor):

@@ -3,7 +3,6 @@ import copy
 import os
 import torch
 from torch import nn
-from utils_misc import prepare_data
 from abc import ABC, abstractmethod
 import numpy as np
 from utils_test import couple_inputs, get_psnr, get_ssim
@@ -63,6 +62,8 @@ class BaseSampleReconstructionAttack(ABC):
 
         else:
             inputs = inputs[:self.batch_size].float()
+        labels = labels[:self.batch_size].long()
+        
 
         return inputs.to(self.device), labels.to(self.device)
 
@@ -206,7 +207,10 @@ class BaseSampleReconstructionAttack(ABC):
             psnr_list = [get_psnr(paired_inputs[i][0], paired_inputs[i][1], data_range=2) for i in range(len(paired_inputs))]
             avg_psnr = sum(psnr_list)/len(psnr_list)
             norm_diff_list = [torch.norm(paired_inputs[i][0] - paired_inputs[i][1]).item() for i in range(len(paired_inputs))]
-            n_perfect_reconstructed = sum([norm_diff_list[i] < 0.1 for i in range(len(norm_diff_list))])
+            n_perfect_reconstructed = sum([(norm_diff_list[i] < 0.1 or ssim_list[i] > 0.99) for i in range(len(norm_diff_list))])
+
+            # restore_images([paired_inputs[79][0], paired_inputs[79][1]], dataset_name="imagenet", display=True)
+
             result_dict = {
                 "ssim_list": np.array(ssim_list).astype(np.double).tolist(),
                 "avg_ssim": avg_ssim,
@@ -557,15 +561,12 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             paired_inputs = []
             
         elif len(rec_input) == self.inputs.shape[0]:
-            if self.dataset_type == 'tabular':
-                paired_inputs = [(rec_input[i], self.inputs[self.inputs_idx[i]].cpu(), torch.norm(rec_input[i] - self.inputs[self.inputs_idx[i]].cpu()) ) \
+            paired_inputs = [(rec_input[i], self.inputs[self.inputs_idx[i]].cpu(), torch.norm(rec_input[i] - self.inputs[self.inputs_idx[i]].cpu()) ) \
                                   for i in range(len(rec_input))]
-            else:
-                paired_inputs = [(rec_input[i], self.inputs[self.inputs_idx[i]].cpu(), get_ssim(rec_input[i], self.inputs[self.inputs_idx[i]].cpu(), self.dataset_name) ) \
-                                  for i in range(len(rec_input))]
+
         else:
             inputs_list = [self.inputs[i].cpu() for i in range(self.inputs.shape[0])]
-            paired_inputs = couple_inputs(rec_input, inputs_list, dataset_name=self.dataset_name)
+            paired_inputs = couple_inputs(rec_input, inputs_list, dataset_name=self.dataset_name, device=self.device)
             paired_inputs = self.remove_multiple_reconstruction(paired_inputs)
             
         if self.dataset_type == 'tabular':
