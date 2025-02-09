@@ -646,8 +646,9 @@ def test_resnet_forward():
     print(y)
 def main():
 
-    set_seeds(42)
+    set_seeds(123)
 
+    test_image_isolation(4096, n_trials=10000, var=1)
 
     # test_projection()
 
@@ -659,21 +660,22 @@ def main():
     # test_layer_modification()
     # test_image_isolation(1024, n_trials=10000, var=10)
 
-    test_parallel_attack()
+    # test_parallel_attack()
     # test_resnet_forward()
     # pred_list = check_predictions()
     # print(pred_list)
 
 
-def test_image_isolation(n_samples=30000, n_trials=10, var=1): 
-    images, all_labels = prepare_data() 
+def test_image_isolation(n_samples=30000, n_trials=1000, var=1): 
+    images, all_labels, n_classes = prepare_data(data_dir='/home/fdiana/data/harus', dataset='harus',  n_samples=n_samples, model_type='fc') 
     images = images.to('cuda').float()
     rnd_idx = np.random.choice(images.shape[0], size=n_samples, replace=False)
     images = images[rnd_idx].to('cuda')
     labels = all_labels[rnd_idx].to('cuda')
     for i in range(n_trials):
-        A = (2 * torch.rand(10000, images.shape[1]) - 1).to('cuda')
-        # A = torch.normal(0, var, size=(10000, images.shape[1])).to('cuda')
+        print(f"Trial {i}")
+        # A = (2 * torch.rand(10000, images.shape[1]) - 1).to('cuda')
+        A = torch.normal(0, var, size=(1000, images.shape[1])).to('cuda')
         b_tensor = - torch.matmul(A, torch.transpose(images, 0, 1))
         min_idx = torch.argmin(b_tensor, dim=1)
         if i == 0:
@@ -693,6 +695,8 @@ def test_image_isolation(n_samples=30000, n_trials=10, var=1):
     print(f"Most isolated label: {torch.argmax(count_labels)} | Number of isolations: {torch.max(count_labels)}")
     print(f"Least isolated label: {torch.argmin(count_labels)} | Number of isolations: {torch.min(count_labels)}")
     plt.hist(act_hist.cpu().detach().numpy(), bins=n_samples)
+    plt.xlabel('Image index', fontsize=26)
+    plt.ylabel('# of isolations', fontsize=26)
     plt.show()
     plt.hist(labels_act.cpu(), bins=unique_labels.shape[0])
     plt.show()

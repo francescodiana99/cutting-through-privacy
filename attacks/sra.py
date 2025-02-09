@@ -28,9 +28,10 @@ class BaseSampleReconstructionAttack(ABC):
         batch_computation(bool): Whether to use batch or single sample computation. Default is False.
     """
 
-    def __init__(self, model, data_dir, device, dataset_name, batch_size, n_classes, 
+    def __init__(self, model, model_type, data_dir, device, dataset_name, batch_size, n_classes, 
                  n_local_epochs=1, learning_rate=1e-3, seed=42, double_precision=True, batch_computation=False):
         self.model = model
+        self.model_type = model_type
         self.device = device
         self.dataset_name = dataset_name
         self.batch_size = batch_size
@@ -57,6 +58,17 @@ class BaseSampleReconstructionAttack(ABC):
         
         inputs = torch.load(os.path.join(data_path, 'inputs.pt'), weights_only=True)
         labels = torch.load(os.path.join(data_path, 'labels.pt'), weights_only=True)
+
+        if self.model_type == 'cnn':
+            if self.dataset_name in ['cifar10', 'cifar100']:
+                inputs = inputs.view(inputs.shape[0], 3, 32, 32)
+            elif self.dataset_name == 'imagenet':
+                inputs = inputs.view(inputs.shape[0], 3, 224, 224)
+            elif self.dataset_name == 'tiny-imagenet':
+                inputs = inputs.view(inputs.shape[0], 3, 64, 64)
+            else:
+                raise ValueError(f"Model type {self.model_type} is not supported for dataset {self.dataset_name}.")
+
 
         if self.double_precision:
             inputs = inputs[:self.batch_size].double()
@@ -248,11 +260,12 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         batch_computation(bool): Whether to use batch or single sample computation. Default is False.
     """
 
-    def __init__(self, model, dataset_name, n_classes, device, seed, double_precision,
+    def __init__(self, model, model_type, dataset_name, n_classes, device, seed, double_precision,
                  epsilon, atol, rtol, batch_size, data_dir, n_local_epochs=1, learning_rate=1e-3,parallelize=False, batch_computation=False):
 
         super(HyperplaneSampleReconstructionAttack, self).__init__(
             model=model, 
+            model_type=model_type,
             data_dir=data_dir,
             device=device,
             dataset_name=dataset_name,
@@ -503,30 +516,7 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
                 coeffs_list.append(search_state[i][2])
         
         return final_observations_list, coeffs_list
-        
-    # def _reconstruct_samples(self, observations_list, coeffs_list):
-    #     """
-    #     Reconstruct the samples based on the observations and the coefficients.
-        
-    #     Args:
-    #         observations_list(list): List of observations.
-    #         coeffs_list(list): List of coefficients.
-    #     Returns:
-    #         rec_inputs(torch.Tensor): The reconstructed samples.
-    #     """
-    #     rec_inputs = [observations_list[0]]
-    #     dL_db_list = [coeffs_list[0]]
-
-    #     for k in range(1, len(coeffs_list)):
-    #         obs = observations_list[k]
-    #         dL_db_k = coeffs_list[k] - coeffs_list[k-1]
-    #         dL_db_list.append(dL_db_k)
-    #         alphas = [i/coeffs_list[k] for i in dL_db_list]
-    #         # print(f"Alphas for round {k}: {alphas}")
-    #         recon_input = (obs - sum([alphas[i] * rec_inputs[i] for i in range(len(rec_inputs))]))/ alphas[-1]
-    #         rec_inputs.append(recon_input)
-
-    #     return rec_inputs
+    
 
     def _reconstruct_samples(self, observations, coeffs_list):
         """
@@ -556,7 +546,6 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
 
         return rec_inputs.to('cpu')  # Return as a tensor
 
-        
 
     def execute_attack(self, eval_round=None, debug=False):
         """
@@ -651,10 +640,11 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
     Class implementing the Currious Abandon Honesty attack.
     """
     
-    def __init__(self, model, device, dataset_name, n_classes, seed, double_precision, batch_size, data_dir, atol, rtol, learning_rate=1e-3,
+    def __init__(self, model, model_type, device, dataset_name, n_classes, seed, double_precision, batch_size, data_dir, atol, rtol, learning_rate=1e-3,
                   n_local_epochs=1, parallelize=False, batch_computation=False):
             super(CuriousAbandonHonestyAttack, self).__init__(
                 model=model, 
+                model_type=model_type,
                 data_dir=data_dir,
                 device=device,
                 dataset_name=dataset_name,

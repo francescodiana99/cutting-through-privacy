@@ -205,6 +205,11 @@ def parse_args():
                         help="Flag to use batch computation.",
                         default=False)
     
+    parser.add_argument("--model_type",
+                        type=str,
+                        default='fc',
+                        help="Type of the model to use for the attack."
+                        )
     
     
     return parser.parse_args()
@@ -217,8 +222,6 @@ def main():
     set_seeds(args.seed)
 
     configure_logging()
-
-    dataset_type = "image" if args.dataset in ['cifar10', 'cifar100', 'tiny-imagenet', 'imagenet'] else 'tabular'
 
     n_classes = N_CLASSES[args.dataset]
     input_dim = INPUT_DIM[args.dataset]
@@ -243,17 +246,22 @@ def main():
     
 
     if args.attack_name == 'hsra':
-        model = FCNet(
-            input_dimension=input_dim, 
-            output_dimension=n_classes, 
-            classification_weight_scale=args.classification_weight_scale,
-            hidden_layers=args.hidden_layers,
-            classification_bias=args.classification_bias,
-            input_weights_scale=args.input_weights_scale, 
-            hidden_weights_scale=args.hidden_weights_scale, 
-            hidden_bias_scale=args.hidden_bias_scale,
-            honest=False,
-            )
+
+        if args.model_type == 'fc':
+            model = FCNet(
+                input_dimension=input_dim, 
+                output_dimension=n_classes, 
+                classification_weight_scale=args.classification_weight_scale,
+                hidden_layers=args.hidden_layers,
+                classification_bias=args.classification_bias,
+                input_weights_scale=args.input_weights_scale, 
+                hidden_weights_scale=args.hidden_weights_scale, 
+                hidden_bias_scale=args.hidden_bias_scale,
+                honest=False,
+                )
+        elif args.model_type == 'cnn':
+            
+        
 
         sra_attack = HyperplaneSampleReconstructionAttack(
             dataset_name=args.dataset,
@@ -283,7 +291,6 @@ def main():
                 save_results(args.results_path, result_dict, r)
             
             logging.info(f"Results for round {r} saved in {args.results_path}.")
-
 
     
     elif args.attack_name == 'cah':
