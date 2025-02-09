@@ -339,7 +339,9 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             spacing(float): The maximum intervals' distance.
         """
         n_hyperplanes = self.attack_layer.bias.data.shape[0]
-        b_tensor = - torch.matmul(self.attack_layer.weight[0], torch.transpose(self.inputs, 0, 1)).cpu().detach()
+        if self.model_type == 'cnn':
+            inputs =  torch.flatten(self.inputs, start_dim=1)
+        b_tensor = - torch.matmul(self.attack_layer.weight[0], torch.transpose(inputs, 0, 1)).cpu().detach()
         self.b_sorted, indices = torch.sort(torch.tensor(b_tensor.clone().detach()), dim=0)
 
         space_diff = self.b_sorted[1:] - self.b_sorted[:-1]
@@ -611,18 +613,20 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             rec_input(list): List of reonstructed inputs.
             
         """
-        
+        if self.model_type == 'cnn':
+            inputs =  torch.flatten(self.inputs, start_dim=1).cpu()
+
         if len(rec_input) == 0:
             logging.info("No image was reconstructed.")
             paired_inputs = []
             
-        elif len(rec_input) == self.inputs.shape[0]:
-            paired_inputs = [(rec_input[i], self.inputs[self.inputs_idx[i]].cpu(), torch.norm(rec_input[i] - self.inputs[self.inputs_idx[i]].cpu()) ) \
+        elif len(rec_input) == inputs.shape[0]:
+            paired_inputs = [(rec_input[i], inputs[self.inputs_idx[i]].cpu(), torch.norm(rec_input[i] - inputs[self.inputs_idx[i]].cpu()) ) \
                                   for i in range(len(rec_input))]
 
         else:
             # inputs_list = [self.inputs[i].cpu() for i in range(self.inputs.shape[0])]
-            paired_inputs = couple_inputs(rec_input, self.inputs.cpu())
+            paired_inputs = couple_inputs(rec_input, inputs.cpu())
             paired_inputs = self.remove_multiple_reconstruction(paired_inputs)
             
         if self.dataset_type == 'tabular':
