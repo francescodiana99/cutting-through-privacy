@@ -112,7 +112,7 @@ class BaseSampleReconstructionAttack(ABC):
                     loss = criterion(pred, self.labels[i])
 
                     if debug:
-                        logging.info(f"b: {self.model.layers[0].bias.data}")
+                        logging.info(f"b: {self.attack_layer.bias.data}")
                         # logging.debug(f"db: {dL_db_all}")
                         # logging.debug(f"sum db: {torch.sum(dL_db_all, dim=0)}")
                     loss.backward()
@@ -122,8 +122,8 @@ class BaseSampleReconstructionAttack(ABC):
                 loss = criterion(pred, self.labels)
                 loss.backward()
             optimizer.step()
-            dL_db_input = self.model.layers[0].bias.grad.data.detach().clone()
-            dL_dA_input = self.model.layers[0].weight.grad.data.detach().clone()
+            dL_db_input = self.attack_layer.bias.grad.data.detach().clone()
+            dL_dA_input = self.attack_layer.weight.grad.data.detach().clone()
 
             if e == 0:
                 sum_dL_dA = dL_dA_input
@@ -272,6 +272,8 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         self.model.to(self.device)
         self.parallelize = parallelize
 
+        self.attack_layer = self._get_attack_layer()
+
         if self.double_precision:
             self.model = self.model.double()
         if self.parallelize and device != 'cuda':
@@ -288,6 +290,17 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         self.intervals, self.spacing, self.inputs_idx = self._initialize_search_intervals()
 
         self.current_search_state = []
+
+
+    
+    def _get_attack_layer(self):
+        """
+        Get the first fully connected layer of the model."""
+
+        for m in self.model.modules():
+            if isinstance(m, nn.Linear):
+                return m
+        raise ValueError("The model does not contain any fully connected layer.")
 
     def count_values_in_intervals(self, intervals, values):
         from bisect import bisect_left, bisect_right
@@ -312,8 +325,8 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             intervals(list): List of tuples representing the search intervals.
             spacing(float): The maximum intervals' distance.
         """
-        n_hyperplanes = self.model.layers[0].bias.data.shape[0]
-        b_tensor = - torch.matmul(self.model.layers[0].weight[0], torch.transpose(self.inputs, 0, 1)).cpu().detach()
+        n_hyperplanes = self.attack_layer.bias.data.shape[0]
+        b_tensor = - torch.matmul(self.attack_layer.weight[0], torch.transpose(self.inputs, 0, 1)).cpu().detach()
         self.b_sorted, indices = torch.sort(torch.tensor(b_tensor.clone().detach()), dim=0)
 
         space_diff = self.b_sorted[1:] - self.b_sorted[:-1]
@@ -326,25 +339,25 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
 
         sorted_indices = torch.argsort(b_tensor, dim=0)
         if self.dataset_type == 'tabular':
-            b_1 = torch.where(self.model.layers[0].weight[0].cpu() > 0, -1., 1.)
-            b_2 = torch.where(self.model.layers[0].weight[0].cpu() > 0, 1., -1.)
+            b_1 = torch.where(self.attack_layer.weight[0].cpu() > 0, -1., 1.)
+            b_2 = torch.where(self.attack_layer.weight[0].cpu() > 0, 1., -1.)
         else:
-            b_1 = torch.where(self.model.layers[0].weight[0].cpu() > 0, 0., 1.)
-            b_2 = torch.where(self.model.layers[0].weight[0].cpu() > 0, 1., 0.) 
+            b_1 = torch.where(self.attack_layer.weight[0].cpu() > 0, 0., 1.)
+            b_2 = torch.where(self.attack_layer.weight[0].cpu() > 0, 1., 0.) 
         
         if self.double_precision:
-            b_min = torch.matmul(self.model.layers[0].weight[0].cpu(), b_1.double()).detach().clone()
-            b_max = torch.matmul(self.model.layers[0].weight[0].cpu(), b_2.double()).detach().clone()
+            b_min = torch.matmul(self.attack_layer.weight[0].cpu(), b_1.double()).detach().clone()
+            b_max = torch.matmul(self.attack_layer.weight[0].cpu(), b_2.double()).detach().clone()
         else:
-            b_min = torch.matmul(self.model.layers[0].weight[0].cpu(), b_1).detach().clone()
-            b_max = torch.matmul(self.model.layers[0].weight[0].cpu(), b_2).detach().clone()
+            b_min = torch.matmul(self.attack_layer.weight[0].cpu(), b_1).detach().clone()
+            b_max = torch.matmul(self.attack_layer.weight[0].cpu(), b_2).detach().clone()
             
         # if self.double_precision:
-        #     b_1 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), torch.ones(self.inputs.shape[1]).double()).detach()
-        #     b_2 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), (torch.ones(self.inputs.shape[1]).double() * -1)).detach()
+        #     b_1 = - torch.matmul(abs(self.attack_layer.weight[0]).cpu(), torch.ones(self.inputs.shape[1]).double()).detach()
+        #     b_2 = - torch.matmul(abs(self.attack_layer.weight[0]).cpu(), (torch.ones(self.inputs.shape[1]).double() * -1)).detach()
         # else:
-        #     b_1 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), torch.ones(self.inputs.shape[1])).detach()
-        #     b_2 = - torch.matmul(abs(self.model.layers[0].weight[0]).cpu(), (torch.ones(self.inputs.shape[1]) * -1)).detach()
+        #     b_1 = - torch.matmul(abs(self.attack_layer.weight[0]).cpu(), torch.ones(self.inputs.shape[1])).detach()
+        #     b_2 = - torch.matmul(abs(self.attack_layer.weight[0]).cpu(), (torch.ones(self.inputs.shape[1]) * -1)).detach()
         # b_min = torch.min(b_1, b_2)
         # b_max = torch.max(b_1, b_2)
 
@@ -361,16 +374,16 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         This method simulates the malicious server modifications of the model parameters.
         """
 
-        n_hyperplanes = self.model.layers[0].bias.data.shape[0]
+        n_hyperplanes = self.attack_layer.bias.data.shape[0]
 
         if len(self.intervals) == 1:
             if round != 0:
                 max_spacing = (self.intervals[0][1] - self.intervals[0][0]) / (n_hyperplanes + 2)
-                self.model.layers[0].bias.data = torch.linspace(self.intervals[0][0] + max_spacing,
+                self.attack_layer.bias.data = torch.linspace(self.intervals[0][0] + max_spacing,
                                                                 self.intervals[0][1] - max_spacing, n_hyperplanes)
             else: 
                 max_spacing = (self.intervals[0][1] - self.intervals[0][0]) / n_hyperplanes
-                self.model.layers[0].bias.data = torch.linspace(self.intervals[0][0], 
+                self.attack_layer.bias.data = torch.linspace(self.intervals[0][0], 
                                                                 self.intervals[0][1], n_hyperplanes)
         else:
 
@@ -378,7 +391,7 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             mod_hp = n_hyperplanes % len(self.intervals)
             n_hp = n_hyperplanes // len(self.intervals)
             curr_idx = 0
-            bias_tensor = torch.zeros_like(self.model.layers[0].bias.data)
+            bias_tensor = torch.zeros_like(self.attack_layer.bias.data)
             max_spacing = 0
             interval_idx = 0
 
@@ -407,7 +420,7 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
                 interval_idx += 1
 
             # order the bias tensor
-            self.model.layers[0].bias.data, _ = torch.sort(bias_tensor)
+            self.attack_layer.bias.data, _ = torch.sort(bias_tensor)
 
             # reorder intervals
             self.intervals.sort(key=lambda x: x[0])
@@ -527,10 +540,10 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             torch.Tensor: The reconstructed samples.
         """
         # Convert inputs to tensors if they aren't already
-        observations = torch.stack(observations).to(self.device)
-        coeffs = torch.tensor(coeffs_list).to(self.device)
+        observations = torch.stack(observations).to(self.device).float()
+        coeffs = torch.tensor(coeffs_list).to(self.device).float()
 
-        rec_inputs = torch.tensor(observations[0].clone().detach()).unsqueeze(0)  # Initialize with the first observation
+        rec_inputs = observations[0].clone().detach().unsqueeze(0)  # Initialize with the first observation
         dL_db = coeffs.diff(dim=0, prepend=coeffs[:1])  # Efficiently compute dL_db differences
         dL_db[0] = coeffs[0]  # First element is 1 - coeffs[0]
 
@@ -575,7 +588,7 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             # server reloads the old model 
             self.model.load_state_dict(server_model)
             
-            self.current_search_state.extend((self.model.layers[0].bias.data[i].detach().clone().cpu(), 
+            self.current_search_state.extend((self.attack_layer.bias.data[i].detach().clone().cpu(), 
                                               observations[i], sum_dL_db[i].item() ) for i in range(observations.shape[0]))
             
             self._update_search_intervals()
@@ -672,6 +685,18 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
         
             elif self.parallelize:
                 self.model = nn.DataParallel(self.model)
+            
+            self.attack_layer = self._get_attack_layer()
+
+    
+    def _get_attack_layer(self):
+        """
+        Get the first fully connected layer of the model."""
+
+        for m in self.model.modules():
+            if isinstance(m, nn.Linear):
+                return m
+        raise ValueError("The model does not contain any fully connected layer.")
     
 
     def execute_attack(self, sigma, mu, scale_factor, eval_round=1):
@@ -724,7 +749,7 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
 
     def _set_malicious_model_params(self, sigma, mu, scale_factor):
         """" Set the malicious model parameters"""
-        N, K = self.inputs.shape[1], self.model.layers[0].weight.shape[0]
+        N, K = self.inputs.shape[1], self.attack_layer.weight.shape[0]
 
         indices = torch.zeros((K, N), dtype=torch.long)
         for row in range(K):
@@ -747,12 +772,12 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
         final_weights.scatter_(1, positive_weight_indices, positive_samples)
         if self.double_precision:
             final_weights = final_weights.double()
-        self.model.layers[0].weight = nn.Parameter(final_weights)
+        self.attack_layer.weight = nn.Parameter(final_weights)
 
-        bias_tensor = torch.ones_like(self.model.layers[0].bias) * mu
+        bias_tensor = torch.ones_like(self.attack_layer.bias) * mu
         if self.double_precision:
             bias_tensor = bias_tensor.double()
-        self.model.layers[0].bias = nn.Parameter(bias_tensor)
+        self.attack_layer.bias = nn.Parameter(bias_tensor)
 
         self.model = self.model.to(self.device)
 
