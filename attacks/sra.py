@@ -1,6 +1,7 @@
 from collections import defaultdict
 import copy
 import os
+import time
 import torch
 from torch import nn
 from abc import ABC, abstractmethod
@@ -288,6 +289,20 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
 
         self.current_search_state = []
 
+    def count_values_in_intervals(self, intervals, values):
+        from bisect import bisect_left, bisect_right
+        values = [i.item() for i in values]  # Ensure values are sorted for efficient searching
+        counts = []
+
+        for (lower, upper) in intervals:
+            # Find the leftmost index where values >= lower
+            left_idx = bisect_left(values, lower)
+            # Find the rightmost index where values <= upper
+            right_idx = bisect_right(values, upper)
+            # Count of values in this interval
+            counts.append(right_idx - left_idx + 1)
+
+        return counts
     
     def _initialize_search_intervals(self):
         """
@@ -299,7 +314,12 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         """
         n_hyperplanes = self.model.layers[0].bias.data.shape[0]
         b_tensor = - torch.matmul(self.model.layers[0].weight[0], torch.transpose(self.inputs, 0, 1)).cpu().detach()
-        b_sorted, indices = torch.sort(torch.tensor(b_tensor.clone().detach()), dim=0)
+        self.b_sorted, indices = torch.sort(torch.tensor(b_tensor.clone().detach()), dim=0)
+       
+        space_diff = self.b_sorted[1:] - self.b_sorted[:-1]
+        min_space_idx = torch.argmin(space_diff)
+        logging.info(f"Min spacing for b:{self.b_sorted[min_space_idx]} and {self.b_sorted[min_space_idx + 1]}: {space_diff[min_space_idx]}")
+
         sorted_indices = torch.argsort(b_tensor, dim=0)
         if self.dataset_type == 'tabular':
             b_1 = torch.where(self.model.layers[0].weight[0].cpu() > 0, -1., 1.)
@@ -467,29 +487,58 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         
         return final_observations_list, coeffs_list
         
-    def _reconstruct_samples(self, observations_list, coeffs_list):
+    # def _reconstruct_samples(self, observations_list, coeffs_list):
+    #     """
+    #     Reconstruct the samples based on the observations and the coefficients.
+        
+    #     Args:
+    #         observations_list(list): List of observations.
+    #         coeffs_list(list): List of coefficients.
+    #     Returns:
+    #         rec_inputs(torch.Tensor): The reconstructed samples.
+    #     """
+    #     rec_inputs = [observations_list[0]]
+    #     dL_db_list = [coeffs_list[0]]
+
+    #     for k in range(1, len(coeffs_list)):
+    #         obs = observations_list[k]
+    #         dL_db_k = coeffs_list[k] - coeffs_list[k-1]
+    #         dL_db_list.append(dL_db_k)
+    #         alphas = [i/coeffs_list[k] for i in dL_db_list]
+    #         # print(f"Alphas for round {k}: {alphas}")
+    #         recon_input = (obs - sum([alphas[i] * rec_inputs[i] for i in range(len(rec_inputs))]))/ alphas[-1]
+    #         rec_inputs.append(recon_input)
+
+    #     return rec_inputs
+
+    def _reconstruct_samples(self, observations, coeffs_list):
         """
-        Reconstruct the samples based on the observations and the coefficients.
+        Reconstruct the samples based on the observations and the coefficients using PyTorch tensors.
         
         Args:
-            observations_list(list): List of observations.
-            coeffs_list(list): List of coefficients.
+            observations_list (list or torch.Tensor): List/Tensor of observations.
+            coeffs_list (list or torch.Tensor): List/Tensor of coefficients.
+        
         Returns:
-            rec_inputs(torch.Tensor): The reconstructed samples.
+            torch.Tensor: The reconstructed samples.
         """
-        rec_inputs = [observations_list[0]]
-        dL_db_list = [coeffs_list[0]]
+        # Convert inputs to tensors if they aren't already
+        observations = torch.stack(observations).to(self.device)
+        coeffs = torch.tensor(coeffs_list).to(self.device)
 
-        for k in range(1, len(coeffs_list)):
-            obs = observations_list[k]
-            dL_db_k = coeffs_list[k] - coeffs_list[k-1]
-            dL_db_list.append(dL_db_k)
-            alphas = [i/coeffs_list[k] for i in dL_db_list]
-            # print(f"Alphas for round {k}: {alphas}")
-            recon_input = (obs - sum([alphas[i] * rec_inputs[i] for i in range(len(rec_inputs))]))/ alphas[-1]
-            rec_inputs.append(recon_input)
+        rec_inputs = torch.tensor(observations[0].clone().detach()).unsqueeze(0)  # Initialize with the first observation
+        dL_db = coeffs.diff(dim=0, prepend=coeffs[:1])  # Efficiently compute dL_db differences
+        dL_db[0] = coeffs[0]  # First element is 1 - coeffs[0]
 
-        return rec_inputs
+
+        for k in range(1, len(coeffs)):
+            alphas = dL_db[:k+1] / coeffs[k]
+            weighted_sum = torch.sum(alphas[:k].unsqueeze(1) * rec_inputs, dim=0)
+            recon_input = (observations[k] - weighted_sum) / alphas[k]
+            rec_inputs = torch.cat((rec_inputs, recon_input.unsqueeze(0)), dim=0)
+
+        return rec_inputs.to('cpu')  # Return as a tensor
+
         
 
     def execute_attack(self, eval_round=None, debug=False):
@@ -506,11 +555,6 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             eval_round(int): Round to evaluate. Default is None.
             debug(bool): Whether to print debug information. Default is False.
         """
-
-        if debug:
-            b_tensor = - torch.matmul(self.model.layers[0].weight[0], torch.transpose(self.inputs, 0, 1)).cpu().detach()
-            b_sorted, indices = torch.sort(torch.tensor(b_tensor.clone()), dim=0)
-            logging.debug(f"Min spacing between inputs: {torch.min(b_sorted[1:] - b_sorted[:-1])}")
 
         while self.spacing >= self.epsilon or self.round == 0:
             logging.info("-------------------")
@@ -536,12 +580,18 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
             if len(self.intervals) == 0:
                 self.spacing = 0
             else:
-                self.spacing = self.intervals[0][1] - self.intervals[0][0]
-
+                self.spacing = max([self.intervals[i][1] - self.intervals[i][0] for i in range(len(self.intervals))])
+            
+            # elems_in_intervals = self.count_values_in_intervals(self.intervals, self.b_sorted)
+            
             if self.round == eval_round:
+                start_time = time.time()
                 observations_list, coeffs_list = self._extract_observations() 
+                logging.info(f"Observations extracted in {time.time() - start_time} seconds.")
 
+                start_time = time.time()
                 rec_inputs = self._reconstruct_samples(observations_list, coeffs_list)
+                logging.info(f"Samples reconstructed in {time.time() - start_time} seconds.")
 
                 return rec_inputs
             
@@ -565,8 +615,8 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
                                   for i in range(len(rec_input))]
 
         else:
-            inputs_list = [self.inputs[i].cpu() for i in range(self.inputs.shape[0])]
-            paired_inputs = couple_inputs(rec_input, inputs_list, dataset_name=self.dataset_name, device=self.device)
+            # inputs_list = [self.inputs[i].cpu() for i in range(self.inputs.shape[0])]
+            paired_inputs = couple_inputs(rec_input, self.inputs.cpu())
             paired_inputs = self.remove_multiple_reconstruction(paired_inputs)
             
         if self.dataset_type == 'tabular':
