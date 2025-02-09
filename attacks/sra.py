@@ -315,6 +315,10 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         n_hyperplanes = self.model.layers[0].bias.data.shape[0]
         b_tensor = - torch.matmul(self.model.layers[0].weight[0], torch.transpose(self.inputs, 0, 1)).cpu().detach()
         self.b_sorted, indices = torch.sort(torch.tensor(b_tensor.clone().detach()), dim=0)
+
+        space_diff = self.b_sorted[1:] - self.b_sorted[:-1]
+        min_space_idx = torch.argmin(space_diff)
+        logging.info(f"Min spacing for b:{self.b_sorted[min_space_idx]} and {self.b_sorted[min_space_idx + 1]}: {space_diff[min_space_idx]}")
        
         space_diff = self.b_sorted[1:] - self.b_sorted[:-1]
         min_space_idx = torch.argmin(space_diff)
