@@ -118,7 +118,7 @@ class BaseSampleReconstructionAttack(ABC):
             optimizer.zero_grad()
             if not self.batch_computation:
                 for i in range(self.inputs.shape[0]):
-                    pred = self.model(self.inputs[i])
+                    pred = self.model(self.inputs[i][None, ...])
 
                     pred = pred.squeeze()
                     loss = criterion(pred, self.labels[i])
@@ -717,7 +717,7 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
             self.round += 1
 
         observations_list = self._extract_observations()
-        return observations_list  
+        return torch.stack(observations_list)  
     
 
     def _clean_search_state(self):
@@ -727,10 +727,11 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
 
         """
 
+        inputs = torch.flatten(self.inputs, start_dim=1).cpu()
         new_search_state = []
         for obs in self.current_search_state:
-            for i in range(self.inputs.shape[0]):
-                if torch.norm(obs - self.inputs[i].cpu()) < 0.1:
+            for i in range(inputs.shape[0]):
+                if torch.norm(obs - inputs[i].cpu()) < 0.1:
                     new_search_state.append(obs)
                     break
 
@@ -743,7 +744,10 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
 
     def _set_malicious_model_params(self, sigma, mu, scale_factor):
         """" Set the malicious model parameters"""
-        N, K = self.inputs.shape[1], self.attack_layer.weight.shape[0]
+        if self.model_type == 'cnn':
+            N, K = self.inputs.shape[1] * self.inputs.shape[2] * self.inputs.shape[3], self.attack_layer.weight.shape[0]
+        else:
+            N, K = self.inputs.shape[1], self.attack_layer.weight.shape[0]
 
         indices = torch.zeros((K, N), dtype=torch.long)
         for row in range(K):
@@ -807,8 +811,8 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
             paired_inputs = []
     
         else:
-            inputs_list = [self.inputs[i].cpu() for i in range(self.inputs.shape[0])]
-            paired_inputs = couple_inputs(rec_input, inputs_list, dataset_name=self.dataset_name)
+            inputs = torch.flatten(self.inputs, start_dim=1).cpu()
+            paired_inputs = couple_inputs(rec_input, inputs )
             paired_inputs = self.remove_multiple_reconstruction(paired_inputs)
             
         if self.dataset_type == 'tabular':

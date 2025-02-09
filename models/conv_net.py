@@ -38,7 +38,7 @@ class ConvNet(nn.Module):
         self._initialize_malicious_weights()
 
     def forward(self, x):
-        x_input = x.detach()
+        # x_input = x.detach()
         x = self.conv_block(x)
         x = x[:, :3, :, :]
         x = torch.flatten(x, start_dim=1)
