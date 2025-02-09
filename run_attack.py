@@ -21,6 +21,7 @@ from utils_test import *
 
 from attacks.sra import HyperplaneSampleReconstructionAttack, CuriousAbandonHonestyAttack
 from models.resnets import ResNet, resnet_depths_to_config
+from models.conv_net import ConvNet
 
 
 INPUT_DIM = {
@@ -260,13 +261,23 @@ def main():
                 honest=False,
                 )
         elif args.model_type == 'cnn':
-            
+            model = ConvNet(
+                num_classes=n_classes,
+                in_channels=3,
+                n_attack_neurons=1000,
+                classification_weight_scale=args.classification_weight_scale,
+                classification_bias_scale=args.classification_bias,
+                attack_weight_scale=args.hidden_weights_scale,
+                input_dim=input_dim
+            )
+        else:
+            raise ValueError(f"Model type {args.model_type} is not supported.")
         
-
         sra_attack = HyperplaneSampleReconstructionAttack(
             dataset_name=args.dataset,
             data_dir=args.data_dir,
             model=model,
+            model_type=args.model_type,
             device=args.device,
             seed=args.seed,
             epsilon=args.epsilon,
@@ -294,14 +305,28 @@ def main():
 
     
     elif args.attack_name == 'cah':
-        model = FCNet(
-            input_dimension=input_dim, 
-            output_dimension=n_classes,
-            hidden_layers=args.hidden_layers,
-            honest=True)
+        if args.model_type == 'fc':
+            model = FCNet(
+                input_dimension=input_dim, 
+                output_dimension=n_classes,
+                hidden_layers=args.hidden_layers,
+                honest=True)
+        elif args.model_type == 'cnn':
+            model = ConvNet(
+                num_classes=n_classes,
+                in_channels=3,
+                n_attack_neurons=1000,
+                classification_weight_scale=1,
+                classification_bias_scale=1,
+                attack_weight_scale=1,
+                input_dim=input_dim
+            )
+        else:
+            raise ValueError(f"Model type {args.model_type} is not supported.")
         
         sra_attack = CuriousAbandonHonestyAttack(
             model=model,
+            model_type=args.model_type,
             device=args.device,
             dataset_name=args.dataset,
             data_dir=args.data_dir,
