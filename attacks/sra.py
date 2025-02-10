@@ -617,6 +617,8 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         """
         if self.model_type == 'cnn':
             inputs =  torch.flatten(self.inputs, start_dim=1).cpu()
+        else:
+            inputs = self.inputs.cpu()
 
         if len(rec_input) == 0:
             logging.info("No image was reconstructed.")
