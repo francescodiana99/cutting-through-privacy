@@ -157,7 +157,11 @@ class BaseSampleReconstructionAttack(ABC):
             paired_inputs(list): List of paired inputs without duplicates"""
         
         cleaned_inputs = []
-        for x in self.inputs:
+        if self.model_type == 'cnn':
+            inputs = torch.flatten(self.inputs, start_dim=1)
+        else:
+            inputs = self.inputs
+        for x in inputs:
             x = x.cpu()
             to_compare = []
             for i in paired_inputs:
@@ -735,9 +739,14 @@ class CuriousAbandonHonestyAttack(BaseSampleReconstructionAttack):
         new_search_state = []
         for obs in self.current_search_state:
             for i in range(inputs.shape[0]):
-                if torch.norm(obs - inputs[i].cpu()) < 0.1:
-                    new_search_state.append(obs)
-                    break
+                if self.model_type == 'cnn':
+                    if torch.norm(obs - inputs[i].cpu()) < 0.5:
+                        new_search_state.append(obs)
+                        break
+                else:
+                    if torch.norm(obs - inputs[i].cpu()) < 0.1:
+                        new_search_state.append(obs)
+                        break
 
         # remove duplicates
         cleaned_list = list(set(new_search_state))
