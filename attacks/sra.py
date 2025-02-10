@@ -341,6 +341,8 @@ class HyperplaneSampleReconstructionAttack(BaseSampleReconstructionAttack):
         n_hyperplanes = self.attack_layer.bias.data.shape[0]
         if self.model_type == 'cnn':
             inputs =  torch.flatten(self.inputs, start_dim=1)
+        else:
+            inputs = self.inputs
         b_tensor = - torch.matmul(self.attack_layer.weight[0], torch.transpose(inputs, 0, 1)).cpu().detach()
         self.b_sorted, indices = torch.sort(torch.tensor(b_tensor.clone().detach()), dim=0)
 
