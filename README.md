@@ -1,9 +1,4 @@
 # Cutting Through Privacy: A Hyperplane-Based Data Reconstruction Attack in Federated Learning
-
-
-
-## Getting started
-
 This repo contains the code to run the experiments for the paper **Cutting Through Privacy: A Hyperplane-Based Data Reconstruction Attack in Federated Learning**. The scope of the attack is to reconstruct data sample from gradients in Federated Learning.
 
 ## Getting Started
@@ -17,25 +12,25 @@ To reproduce our experiments on ImageNet first you have to download the [ILSVRC 
 ```
 python run_attack.py --device cuda \ 
 --n_samples 1024 \ 
---eval_rounds "1 2 5 10" \
+--eval_rounds 1 2 5 10 \
 --seed 3 \
 --hidden_layers 1000 \
 --dataset imagenet  \
---classification_bias 1e12 \ 
---input_weights_scale 1e-10 \
+--classification_bias 1e25 \ 
+--input_weights_scale 1e-2\
 --hidden_weights_scale 1e-3 \
 --n_local_epochs 1 \
---learning_rate 1e-10 \
 --attack_name hsra   \
 --hidden_bias_scale 1e-3 \
---classification_weight_scale 1e-2 \
+--classification_weight_scale 1e-1 \
 --double_precision \
 --epsilon 0 \
 --atol 1e-5 \
 --rtol 1e-7 \ 
 --generate_samples 4000 \
---data_dir ~/data/imagenet
---results_path ./results/imagenet/
+--data_dir ~/data/imagenet \
+--results_path ./results/imagenet/ \
+--use_batch_computation
 
 ```
 Add the flag `--save_reconstruction` to save the reconstructed images.
@@ -44,12 +39,11 @@ To run the CAH attack, use:
 ```
 python run_attack.py --device cuda \ 
 --n_samples 1024 \ 
---eval_rounds "1 2 5 10" \
+--eval_rounds 1 2 5 10 \
 --seed 3 \
 --hidden_layers 1000 \
 --dataset imagenet  \
 --n_local_epochs 1 \
---learning_rate 1e-10 \
 --attack_name cah   \
 --double_precision \
 --epsilon 0 \
@@ -59,27 +53,26 @@ python run_attack.py --device cuda \
 --sigma 0.5 \
 --scale_factor 0.99 \
 --generate_samples 4000 \
---data_dir ~/data/imagenet
---results_path ./results/imagenet/
+--data_dir ~/data/imagenet \
+--results_path ./results/imagenet/ \
+--use_batch_computation
 
 ```
 
-To reproduce our esperiments on HARUS dataset, run:
+To reproduce our experiments on HARUS dataset, run:
 
 ```
-python run_attack.py --device cuda 
---n_samples 4096
---eval_rounds "1 10 20 30 40 50" \
+python run_attack.py \
+--device cuda \
+--n_samples 4096 \
+--eval_rounds 1 10 20 30 40 50 \
 --seed 3 \
 --hidden_layers 1000 \
 --dataset harus \
---classification_bias 1e13 \
---input_weights_scale 1e-10 \
---hidden_weights_scale 1e-3 \
---n_local_epochs $n_local_epochs \
---learning_rate $learning_rate \
---hidden_bias_scale 1e-3 \
---classification_weight_scale 1e-4 \
+--classification_bias 1e25 \
+--input_weights_scale 1e-1 \
+--n_local_epochs 1 \
+--classification_weight_scale 1e-1 \
 --double_precision \
 --epsilon 0 \
 --atol 1e-5 \
@@ -87,19 +80,22 @@ python run_attack.py --device cuda
 --data_dir ~/data/harus  \
 --results_path ./results/harus/ \
 --attack_name hsra \
---generate_samples 8000
+--generate_samples 8000 \
+--use_batch_computation 
+
 
 ```
 To run CAH attack, use:
 
 ```
---n_samples 4096
---eval_rounds "1 10 20 30 40 50" \
+python run_attack.py \
+--device cuda \
+--n_samples 4096 \
+--eval_rounds 1 10 20 30 40 50 \
 --seed 3 \
 --hidden_layers 1000 \
 --dataset harus \
---n_local_epochs $n_local_epochs \
---learning_rate $learning_rate \
+--n_local_epochs 1 \
 --mu 0 \
 --sigma 1 \
 --scale_factor 0.97 \
@@ -110,11 +106,112 @@ To run CAH attack, use:
 --data_dir ~/data/harus  \
 --results_path ./results/harus/ \
 --attack_name cah \
---generate_samples 8000
+--generate_samples 8000 \
+--use_batch_computation
 
 ```
-The first time you run the attack, you should add the flag 
+The first time you run the attack, you should add the flag `generate_samples`
 To modify the number of hidden layers, assign to `--hidden_layers`a list of number of neurons in each hidden layer, separated by space. For example using `--hidden_layers 1000 100 100` will train a neural network with 3 hidden layers, of 1000, 100 and 100 neurons respectively.
+
+To run our attack on CIFAR-10, use:
+
+```
+python run_attack.py --device cuda \
+--n_samples 2048 \
+--eval_rounds 1 10 20 30 40 50 \
+--seed 3 \
+--hidden_layers 1000 \
+--dataset cifar10 \
+--classification_bias 1e25 \
+--input_weights_scale 1e-1 \
+--n_local_epochs 1 \
+--classification_weight_scale 1e-1 \
+--double_precision \
+--epsilon 0 \
+--atol 1e-5 \
+--rtol 1e-7 \
+--data_dir ~/data/cifar10  \
+--results_path ./results/cifar10/ \
+--attack_name hsra \
+--generate_samples 4000 \
+--use_batch_computation
+
+```
+
+To run CAH attack, use:
+
+```
+python run_attack.py \
+--device cuda \
+--n_samples 2048 \
+--eval_rounds 1 10 20 30 40 50 \
+--seed 3 \
+--hidden_layers 1000 \
+--dataset cifar10 \
+--n_local_epochs 1 \
+--mu 0 \
+--sigma 1 \
+--scale_factor 0.95 \
+--double_precision \
+--epsilon 0 \
+--atol 1e-5 \
+--rtol 1e-7 \
+--data_dir ~/data/cifar10  \
+--results_path ./results/cifar10/ \
+--attack_name cah \
+--generate_samples 8000 \
+--use_batch_computation
+```
+Note, to run the attacks in single precision, remove the flag `--double_precision`.
+
+Finally, to test the attacks on CNN, run:
+
+```
+python run_attack.py --device cuda \
+--n_samples 2048 \
+--eval_rounds 1 10 20 30 40 50 \
+--seed 3 \
+--hidden_layers 1000 \
+--dataset cifar10 \
+--classification_bias 1e25 \
+--input_weights_scale 1e-1 \
+--n_local_epochs 1 \
+--classification_weight_scale 1e-1 \
+--epsilon 0 \
+--atol 1e-5 \
+--rtol 1e-7 \
+--data_dir ~/data/cifar10  \
+--results_path ./results/cifar10/ \
+--attack_name hsra \
+--generate_samples 4000 \
+--use_batch_computation \
+--model_type cnn
+```
+
+
+```
+python run_attack.py \
+--device cuda \
+--n_samples 32 \
+--eval_rounds 1 10 20 30 40 50 \
+--seed 42 \
+--hidden_layers 1000 \
+--dataset cifar10 \
+--n_local_epochs 1 \
+--mu 0 \
+--sigma 1 \
+--scale_factor 0.95 \
+--epsilon 0 \
+--atol 1e-5 \
+--rtol 1e-7 \
+--data_dir ~/data/cifar10  \
+--results_path ./results/cifar10/ \
+--attack_name cah \
+--generate_samples 1000 \
+--use_batch_computation \
+--model_type cnn
+```
+
 
 
 
