@@ -23,35 +23,6 @@ import time
 from datasets.adult.adult import AdultDataset
 from datasets.harus.harus import HARUSDataset
 from datasets.tiny_imagenet.tiny_imagenet import TinyImageNetDataset
-
-
-class NN(nn.Module):
-    """
-    Simple fully connected neural network with one hidden layer.
-    """
-    def __init__(self, input_dim, n_classes=100, hidden_dim=1000, weight_scale=1):
-        """
-        Args:
-            input_dim(int): Dimension of the input.
-            n_classes(int): Number of classes in the dataset.
-            hidden_dim(int): Dimension of the hidden layer.
-        """
-        super(NN, self).__init__()
-        self.hidden_dim = hidden_dim
-        if hidden_dim != 0:
-            self.fc1 = nn.Linear(input_dim, hidden_dim)
-            self.fc2 = nn.Linear(hidden_dim, n_classes)
-        else:
-            self.fc1 = nn.Linear(input_dim, n_classes)
-
-        torch.nn.init.uniform_(self.fc1.weight, 0, 1*weight_scale)
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = F.relu(x)
-        if self.hidden_dim != 0:
-            x = self.fc2(x)
-        return x
     
 
 def prepare_data(double_precision=False, dataset='cifar10', data_dir='./data/', n_samples=32, model_type='fc'):
@@ -231,3 +202,40 @@ def save_results(data_path, result_dict, com_round, rec_inputs=None):
 
     if rec_inputs is not None:
         torch.save(rec_inputs, os.path.join(data_path, f"{com_round}.pt"))
+
+
+def restore_images(images, device='cpu', display=False, title=None, dataset_name='cifar10'):
+    if dataset_name != 'imagenet':
+        std = torch.tensor([0.5, 0.5, 0.5]).to(device)
+        mean = torch.tensor([0.5, 0.5, 0.5]).to(device)
+    else:
+        std = torch.tensor([0.229, 0.224, 0.225]).to(device)
+        mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
+    images_scaled = []
+    for image in images:
+        image = image.to(device)
+        if dataset_name in ['cifar10', 'cifar100']:
+            image = image.view(3, 32, 32)
+        elif dataset_name == 'tiny-imagenet':
+            image = image.view(3, 64, 64)
+        elif dataset_name == 'imagenet':
+            image = image.view(3, 224, 224)
+        else:
+            raise ValueError("Dataset not supported")
+        image = image.permute(1, 2, 0)
+        image = image * std + mean
+        images_scaled.append(image)
+
+    if display:
+
+        fig, axs = plt.subplots(1, len(images_scaled))
+
+        for i in range(len(images_scaled)):
+            axs[i].imshow((images_scaled[i].to('cpu').numpy()))
+            axs[i].axis('off')
+        if title is not None:
+            plt.title(title)
+        plt.show()
+    
+    return image
+

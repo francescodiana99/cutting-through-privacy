@@ -15,13 +15,14 @@ import matplotlib.pyplot as plt
 import argparse
 import os
 
-from utils_search import *
+# from utils_search import *
 from utils_misc import *
 from utils_test import * 
 
 from attacks.sra import HyperplaneSampleReconstructionAttack, CuriousAbandonHonestyAttack
 from models.resnets import ResNet, resnet_depths_to_config
 from models.conv_net import ConvNet
+from models.fc_net import FCNet
 
 
 INPUT_DIM = {

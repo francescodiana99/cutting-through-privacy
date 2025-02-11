@@ -17,31 +17,9 @@ import math
 import argparse
 import os
 import time
-from utils_search import *
 
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
-
-
-def check_span_artificial(observation, images_reconstructed, observation_points, orth_subspace):
-
-    """
-    Check if the observation is in the span of the images_reconstructed by projecting all the components"""
-    observation = observation.double()
-    orth_subspace = orth_subspace.double()
-    residual = project_onto_orth_subspace(observation, orth_subspace)
-
-    # for j in range(orth_subspace.shape[0]):
-    #     print(f"Dot product with the orthogonal component {j}: {torch.dot(residual, orth_subspace[j])}")
-
-    norm = torch.dot(residual, residual)
-    if norm > 1e-5:
-        flag = False
-
-    else:
-        flag = True
-
-    return flag, residual, norm
 
 
 def get_activations(acts):
@@ -221,27 +199,6 @@ def get_psnr(input_1, input_2, data_range=1):
     psnr_metric = psnr(input_1, input_2, data_range=data_range) 
 
     return psnr_metric
-
-
-# def couple_inputs(rec_inputs_list, true_inputs_list, dataset_name='cifar10'):
-#     """
-#     Find the correspondencies between images, according to SSIM if data are images, otherwise according to the maximum norm difference."""
-#     couples = []
-#     if dataset_name in ['cifar10', 'cifar100', 'tiny-imagenet', 'imagenet']:
-#         for i in range(len(rec_inputs_list)):
-#             img_1 = rec_inputs_list[i]
-#             ssim_list = [get_ssim(img_1, img_2, dataset_name) for img_2 in true_inputs_list]
-#             max_ssim = max(ssim_list)
-#             idx = ssim_list.index(max_ssim)
-#             couples.append((rec_inputs_list[i], true_inputs_list[idx], max_ssim))
-#     else:
-#         for i in range(len(rec_inputs_list)):
-#             img_1 = rec_inputs_list[i]
-#             diff_list = [torch.norm(img_1 - img_2).item() for img_2 in true_inputs_list]
-#             min_diff = min(diff_list)
-#             idx = diff_list.index(min_diff)
-#             couples.append((rec_inputs_list[i], true_inputs_list[idx], min_diff))
-#     return couples
 
 
 def couple_inputs(rec_inputs, true_inputs,  batch_size=10):
