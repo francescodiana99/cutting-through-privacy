@@ -1,93 +1,120 @@
-# Hyperplane SRA
+# Cutting Through Privacy: A Hyperplane-Based Data Reconstruction Attack in Federated Learning
 
 
 
 ## Getting started
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+This repo contains the code to run the experiments for the paper **Cutting Through Privacy: A Hyperplane-Based Data Reconstruction Attack in Federated Learning**. The scope of the attack is to reconstruct data sample from gradients in Federated Learning.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
-
+## Getting Started
+Install the required packages using
 ```
-cd existing_repo
-git remote add origin https://gitlab.inria.fr/fdiana/hyperplane-sra.git
-git branch -M main
-git push -uf origin main
+pip install requirements.txt
 ```
-
-## Integrate with your tools
-
-- [ ] [Set up project integrations](https://gitlab.inria.fr/fdiana/hyperplane-sra/-/settings/integrations)
-
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
 
 ## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+To reproduce our experiments on ImageNet first you have to download the [ILSVRC 2012 dataset](https://image-net.org/download-images.php) and place it in your `data_dir`. Then you can run the following command to launch our attack:
+```
+python run_attack.py --device cuda \ 
+--n_samples 1024 \ 
+--eval_rounds "1 2 5 10" \
+--seed 3 \
+--hidden_layers 1000 \
+--dataset imagenet  \
+--classification_bias 1e12 \ 
+--input_weights_scale 1e-10 \
+--hidden_weights_scale 1e-3 \
+--n_local_epochs 1 \
+--learning_rate 1e-10 \
+--attack_name hsra   \
+--hidden_bias_scale 1e-3 \
+--classification_weight_scale 1e-2 \
+--double_precision \
+--epsilon 0 \
+--atol 1e-5 \
+--rtol 1e-7 \ 
+--generate_samples 4000 \
+--data_dir ~/data/imagenet
+--results_path ./results/imagenet/
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```
+Add the flag `--save_reconstruction` to save the reconstructed images.
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+To run the CAH attack, use:
+```
+python run_attack.py --device cuda \ 
+--n_samples 1024 \ 
+--eval_rounds "1 2 5 10" \
+--seed 3 \
+--hidden_layers 1000 \
+--dataset imagenet  \
+--n_local_epochs 1 \
+--learning_rate 1e-10 \
+--attack_name cah   \
+--double_precision \
+--epsilon 0 \
+--atol 1e-5 \
+--rtol 1e-7 \ 
+--mu 0 \
+--sigma 0.5 \
+--scale_factor 0.99 \
+--generate_samples 4000 \
+--data_dir ~/data/imagenet
+--results_path ./results/imagenet/
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+```
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+To reproduce our esperiments on HARUS dataset, run:
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+```
+python run_attack.py --device cuda 
+--n_samples 4096
+--eval_rounds "1 10 20 30 40 50" \
+--seed 3 \
+--hidden_layers 1000 \
+--dataset harus \
+--classification_bias 1e13 \
+--input_weights_scale 1e-10 \
+--hidden_weights_scale 1e-3 \
+--n_local_epochs $n_local_epochs \
+--learning_rate $learning_rate \
+--hidden_bias_scale 1e-3 \
+--classification_weight_scale 1e-4 \
+--double_precision \
+--epsilon 0 \
+--atol 1e-5 \
+--rtol 1e-7 \
+--data_dir ~/data/harus  \
+--results_path ./results/harus/ \
+--attack_name hsra \
+--generate_samples 8000
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+```
+To run CAH attack, use:
 
-## License
-For open source projects, say how it is licensed.
+```
+--n_samples 4096
+--eval_rounds "1 10 20 30 40 50" \
+--seed 3 \
+--hidden_layers 1000 \
+--dataset harus \
+--n_local_epochs $n_local_epochs \
+--learning_rate $learning_rate \
+--mu 0 \
+--sigma 1 \
+--scale_factor 0.97 \
+--double_precision \
+--epsilon 0 \
+--atol 1e-5 \
+--rtol 1e-7 \
+--data_dir ~/data/harus  \
+--results_path ./results/harus/ \
+--attack_name cah \
+--generate_samples 8000
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```
+The first time you run the attack, you should add the flag 
+To modify the number of hidden layers, assign to `--hidden_layers`a list of number of neurons in each hidden layer, separated by space. For example using `--hidden_layers 1000 100 100` will train a neural network with 3 hidden layers, of 1000, 100 and 100 neurons respectively.
+
+
+
