@@ -1,5 +1,8 @@
 # Cutting Through Privacy: A Hyperplane-Based Data Reconstruction Attack in Federated Learning
-This repo contains the code to run the experiments for the paper **Cutting Through Privacy: A Hyperplane-Based Data Reconstruction Attack in Federated Learning**. The scope of the attack is to reconstruct data sample from gradients in Federated Learning.
+This repo contains the code to reproduce the experiments for the paper [Cutting Through Privacy: A Hyperplane-Based Data Reconstruction Attack in Federated Learning](https://dl.acm.org/doi/10.5555/3762387.3762431).  
+
+Federated Learning (FL) enables collaborative training of machine learning models across distributed clients without sharing raw data, ostensibly preserving data privacy. Nevertheless, recent studies have revealed critical vulnerabilities in FL, showing that a malicious central server can manipulate model updates to reconstruct clients' private training data. Existing data reconstruction attacks have important limitations: they often rely on assumptions about the clients' data distribution or their efficiency significantly degrades when batch sizes exceed just a few tens of samples.  
+In this work, we introduce a novel data reconstruction attack that overcomes these limitations. Our method leverages a new geometric perspective on fully connected layers to craft malicious model parameters, enabling the perfect recovery of arbitrarily large data batches in classification tasks without any prior knowledge of clients' data. Through extensive experiments on both image and tabular datasets, we demonstrate that our attack outperforms existing methods and achieves perfect reconstruction of data batches two orders of magnitude larger than the state of the art.
 
 ## Getting Started
 Install the required packages using
@@ -8,7 +11,7 @@ pip install requirements.txt
 ```
 
 ## Usage
-To reproduce our experiments on ImageNet first you have to download the [ILSVRC 2012 dataset](https://image-net.org/download-images.php) and place it in your `data_dir`. Then you can run the following command to launch our attack:
+To reproduce our experiments on ImageNet, first you have to download the [ILSVRC 2012 dataset](https://image-net.org/download-images.php) and place it in your `data_dir`. Then you can run the following command to launch our attack:
 ```
 python run_attack.py --device cuda \ 
 --n_samples 1024 \ 
@@ -211,6 +214,10 @@ python run_attack.py \
 --use_batch_computation \
 --model_type cnn
 ```
+
+Code to reproduce experiments with multiple local steps and noise will be added soon.
+For any question, please, send an email to [francesco.diana@inria.fr](mailto:francesco.diana@inria.fr)
+
 
 
 
